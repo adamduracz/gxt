@@ -17,14 +17,7 @@ import System.Random
 
 main = do a <- getArgs
           s <- readFile "out.xsd"
-          let schema@
-                Schema { targetNameSpace = name
-                       , elements        = es
-                       , simpleTypes     = sts
-                       , complexTypes    = cts
-                       , groups          = gs
-                       , attributeGroups = ags
-                       } = readSchema s
+          let schema = readSchema s
               gen = mkSchemaGen schema "priceList"
           randomXmlDocs <- generateTestData 5 gen
           ecs <- validateXmls randomXmlDocs (head a)
