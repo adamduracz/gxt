@@ -114,7 +114,7 @@ genElmNode n sisNodeGens = genElmNodeAux sisNodeGens []
       if null gens then
         -- TODO Replace [] with generated attributes
         return $ ElmNode n [] $ ElmList $ nodes 
-      else
+      else       
         do n <- head gens
            genElmNodeAux (tail gens) (nodes ++ n)
 

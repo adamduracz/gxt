@@ -2,11 +2,12 @@ module Main where
 
 import Generator hiding (main)
 import Schema
-import XmlParser -- TODO Can I get Schema to re-export this instead?
+import XmlParser
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
-import System
+import System (ExitCode, getArgs, system)
+import System.Process (readProcessWithExitCode)
 import System.Random
   ( Random
   , StdGen
@@ -15,32 +16,61 @@ import System.Random
   , newStdGen
   )
 
-main = do a <- getArgs
-          s <- readFile "out.xsd"
+type ProcessInput  = (FilePath, [String], String)
+type ProcessOutput = (ExitCode,  String , String)
+
+-- TODO Extract these as command line parameters
+inSchema     = "in.xsd"
+outSchema    = "out.xsd"
+numberOfRuns = 10
+
+main = do args <- getArgs
+          s <- readFile inSchema
           let schema = readSchema s
               gen = mkSchemaGen schema "priceList"
-          randomXmlDocs <- generateTestData 5 gen
-          ecs <- validateXmls randomXmlDocs (head a)
-          mapM_ (putStrLn . show) ecs
+          randomXmlDocs <- generateTestData numberOfRuns gen
+          -- TODO Figure out why generateTestData doesn' produce the desired amount of docs!
+          putStrLn $ "number of docs requested: " ++ show numberOfRuns 
+                   ++ "generated: " ++ (show $ length randomXmlDocs)
+          transformedDocs <- transformXmls randomXmlDocs "transform.xsl"
+          let docsToValidate = map (readTree . (\(_,s,_) -> s)) transformedDocs
+          -- mapM_ (putStrLn . show) docsToValidate
+          valitationResults <- validateXmls docsToValidate outSchema
+          -- mapM_ (putStrLn . show) valitationResults
           return ()
+
+transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
+transformXmls xmlDocs xsltPath = do
+  let cmds = map (\xmlDoc -> transformCommand xmlDoc xsltPath) xmlDocs
+  resultTriples <- mapM readProcessWithExitCode' cmds
+  return resultTriples
+  where
+    readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
+
+-- | Produces a tripe of input for the readProcessWithExitCode function
+transformCommand :: XmlDoc -> String -> ProcessInput
+transformCommand inputDoc xslPath =
+  ( "xsltproc"    -- Path to the XSL transform command (xsltproc)  
+  , [ xslPath     -- Path to the stylesheet
+    , "-"         -- Makes xsltproc read XML from stdin
+    ]
+  , show inputDoc -- The XML string, will be passed to xsltproc through stdin
+  )
 
 validateXmls :: [XmlDoc] -> String -> IO [ExitCode]
 validateXmls xmlDocs schemaPath = do
-  let cmds = map (\xmlDoc -> validateXMLCommand xmlDoc schemaPath) xmlDocs
-  ecs <- mapM system cmds 
-  return ecs
+  let cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
+  exitCodes <- mapM system cmds 
+  return exitCodes
 
--- | XMLDoc       - Document to be validated
--- | String       - Path to schema
--- | Maybe String - (Nothing) if document validates, (Maybe errorMessage) otherwise 
-validateXMLCommand :: XmlDoc -> String -> String
-validateXMLCommand docToValidate schemaPath =
-  "echo \"" ++ show docToValidate ++  "\" | xmllint --noout --schema '" ++ schemaPath ++ "' -" 
+validateXmlCommand :: XmlDoc -> String -> String
+validateXmlCommand docToValidate schemaPath =
+  "echo \"" ++ show docToValidate ++  "\" | xmllint --noout --schema \"" ++ schemaPath ++ "\" -" 
 
 generateTestData :: Int -> Q.Gen a -> IO [a]
 generateTestData howMany g =
   do rnd0 <- newStdGen
      let m = G.unGen g
      let rnds rnd = rnd1 : rnds rnd2 where (rnd1,rnd2) = System.Random.split rnd
-     return [(m r n) | (r,n) <- rnds rnd0 `zip` [0,2..howMany] ]
+     return [(m r n) | (r,n) <- rnds rnd0 `zip` [0,2..(2 * howMany - 1)] ]
 
