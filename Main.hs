@@ -29,9 +29,6 @@ main = do args <- getArgs
           let schema = readSchema s
               gen = mkSchemaGen schema "priceList"
           randomXmlDocs <- generateTestData numberOfRuns gen
-          -- TODO Figure out why generateTestData doesn' produce the desired amount of docs!
-          putStrLn $ "number of docs requested: " ++ show numberOfRuns 
-                   ++ "generated: " ++ (show $ length randomXmlDocs)
           transformedDocs <- transformXmls randomXmlDocs "transform.xsl"
           let docsToValidate = map (readTree . (\(_,s,_) -> s)) transformedDocs
           -- mapM_ (putStrLn . show) docsToValidate
@@ -47,7 +44,7 @@ transformXmls xmlDocs xsltPath = do
   where
     readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
--- | Produces a tripe of input for the readProcessWithExitCode function
+-- | Produces a triple of input for the readProcessWithExitCode function
 transformCommand :: XmlDoc -> String -> ProcessInput
 transformCommand inputDoc xslPath =
   ( "xsltproc"    -- Path to the XSL transform command (xsltproc)  
