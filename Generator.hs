@@ -11,6 +11,7 @@ import XmlParser -- TODO Can I get Schema to re-export this instead?
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
+import qualified Codec.Binary.Base64.String as B64
 
 ------------------------------------------------------------------------
 -- Test functions
@@ -67,8 +68,9 @@ mkElementGen e typingContext = case e of
     case prefix of
      -- Built in XML Schema base types
       "xsd" -> case name of
-        "string"  -> sizedListOf mino maxo $ genTxtNodeString n
-        "integer" -> sizedListOf mino maxo $ genTxtNodeInteger n
+        "string"       -> sizedListOf mino maxo $ genTxtNodeString n
+        "integer"      -> sizedListOf mino maxo $ genTxtNodeInteger n
+        "base64Binary" -> sizedListOf mino maxo $ genTxtNodeBase64String n
         other     -> error $ "Unsupported schema base type: " ++ (show t)
       -- Types defined in the schema
       custom -> sizedListOf mino maxo $ lookupTypeAndMkGen t typingContext n
@@ -122,13 +124,33 @@ genTxtNodeString :: Name -> Q.Gen Node
 genTxtNodeString n = do s <- genString
                         return $ TxtNode n [] s
 
+-- TODO Replace this wasteful implementation by one that directly generates a valid Base64 string
+genTxtNodeBase64String :: Name -> Q.Gen Node
+genTxtNodeBase64String n = do s <- genString
+                              return $ TxtNode n [] $ B64.encode s
+
 genTxtNodeInteger :: Name -> Q.Gen Node
 genTxtNodeInteger n = do (s::Int) <- Q.arbitrary
                          return $ TxtNode n [] $ show s
 
--- TODO Make this generate arbitart XML-escaped strings
+-- TODO Add map of string chars to generate with as optional CLI parameter
 genString :: Q.Gen String
-genString = Q.listOf $ Q.elements $ ' ' : ['A'..'Z'] 
+genString = do s <- Q.listOf $ Q.elements ['\32'..'\254']
+               return $ xmlEncode s
+
+xmlEncode :: String -> String
+xmlEncode [] = []
+xmlEncode (c:cs) = 
+  case l of
+    Nothing -> c :  xmlEncode cs
+    Just e  -> e ++ xmlEncode cs
+    where
+      l = lookup c [ ('\"',"&quot;")
+                   , ('\'',"&apos;")
+                   , ('<' ,"&lt;")
+                   , ('>' ,"&gt;")
+                   , ('&' ,"&amp;")
+                   ]
 
 ------------------------------------------------------------------------
 -- Generator combinators

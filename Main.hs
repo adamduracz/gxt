@@ -30,18 +30,20 @@ main = do args <- getArgs
               gen = mkSchemaGen schema "priceList"
           randomXmlDocs <- generateTestData numberOfRuns gen
           transformedDocs <- transformXmls randomXmlDocs "transform.xsl"
-          let docsToValidate = map (readTree . (\(_,s,_) -> s)) transformedDocs
+          let docsToValidate = map (readTree . exitCode) transformedDocs
           -- mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchema
-          -- mapM_ (putStrLn . show) valitationResults
+          mapM_ (putStrLn . show) valitationResults
           return ()
+          where
+            exitCode (_,e,_) = e
 
 transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
-  let cmds = map (\xmlDoc -> transformCommand xmlDoc xsltPath) xmlDocs
   resultTriples <- mapM readProcessWithExitCode' cmds
   return resultTriples
   where
+    cmds = map (\xmlDoc -> transformCommand xmlDoc xsltPath) xmlDocs
     readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
 -- | Produces a triple of input for the readProcessWithExitCode function
@@ -54,15 +56,24 @@ transformCommand inputDoc xslPath =
   , show inputDoc -- The XML string, will be passed to xsltproc through stdin
   )
 
-validateXmls :: [XmlDoc] -> String -> IO [ExitCode]
+validateXmls :: [XmlDoc] -> String -> IO [ProcessOutput]
 validateXmls xmlDocs schemaPath = do
-  let cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
-  exitCodes <- mapM system cmds 
-  return exitCodes
+  resultTriples <- mapM readProcessWithExitCode' cmds
+  return resultTriples
+    where
+      cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
+      readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
-validateXmlCommand :: XmlDoc -> String -> String
+validateXmlCommand :: XmlDoc -> String -> ProcessInput
 validateXmlCommand docToValidate schemaPath =
-  "echo \"" ++ show docToValidate ++  "\" | xmllint --noout --schema \"" ++ schemaPath ++ "\" -" 
+  ( "xmllint"          -- Path to the XML validator command (xmllint)  
+  , [ "--noout"        -- Prevent xmllint from writing output to stdout
+    , "--schema"       -- Indicate that the next argument is the schema path
+    , schemaPath       -- Path to the schema
+    , "-"              -- Makes xmllint read XML from stdin
+    ]
+  , show docToValidate -- The XML string, will be passed to xmllint through stdin
+  )
 
 generateTestData :: Int -> Q.Gen a -> IO [a]
 generateTestData howMany g =
