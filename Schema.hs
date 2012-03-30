@@ -211,7 +211,7 @@ nodeToSimpleType tns node@(ElmNode n as (ElmList els)) =
   let ElmNode tn tas (ElmList tels) = head els in
   case tn of
     "xsd:restriction" -> SimpleTypeRestriction
-      (fmap stringToQName $ lookup "name" as)
+      (maybeStringToMaybeQName tns $ lookup "name" as)
       (stringToQName $ lookupE "base" ras)
       restriction
       where
@@ -223,7 +223,7 @@ nodeToSimpleType tns node@(ElmNode n as (ElmList els)) =
              Enumeration $ map (getAttrValue "value") $ elems rnode
           "xsd:maxExclusive" -> 
              MaxExclusive $ read $ getAttrValue "value" $ head $ elems rnode
-    e -> error $ "Failed to convert node to SimpleType: " ++ e
+    e -> error $ "Failed to convert node  to SimpleType: " ++ e
 
 -- | ComplexType
 -- | The Name parameter is the target namespace of the schema, to which the type will be added
