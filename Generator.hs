@@ -4,14 +4,29 @@
 -- QuickCheck generators for the types defined in the Schema module
 ------------------------------------------------------------------------
 
+------------------------------------------------------------------------
+-- TODO
+-- - Add generation of attributes
+-- - Implement generation of remaining two-character escapes
+------------------------------------------------------------------------
+
 module Generator where
 
 import Schema
 import XmlParser -- TODO Can I get Schema to re-export this instead?
+import qualified RegEx as R
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
 import qualified Codec.Binary.Base64.String as B64
+
+------------------------------------------------------------------------
+-- Constants
+------------------------------------------------------------------------
+
+stringCharacters   = ['\32'..'\254']
+digitCharacters    = ['0'..'9']
+nonDigitCharacters = [ c | c <- stringCharacters, not $ c `elem` digitCharacters ] 
 
 ------------------------------------------------------------------------
 -- Test functions
@@ -64,7 +79,7 @@ mkElementGen :: Element -> Schema -> Q.Gen [Node]
 mkElementGen e typingContext = case e of
   -- TODO Implement substitution groups
   ElementRef n _ _ _ -> return [TxtNode n [] ""] -- TODO
-  ElementWithTypeRef n t@(QName prefix name) mino maxo msg ->
+  ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     case prefix of
      -- Built in XML Schema base types
       "xsd" -> case name of
@@ -74,19 +89,15 @@ mkElementGen e typingContext = case e of
         other     -> error $ "Unsupported schema base type: " ++ (show t)
       -- Types defined in the schema
       custom -> sizedListOf mino maxo $ lookupTypeAndMkGen t typingContext n
-  ElementWithSimpleTypeDecl n _ _ -> 
-    return [TxtNode n [] "IAmSimpleTyped"] -- TODO
+  ElementWithSimpleTypeDecl n mino maxo t ms -> 
+    sizedListOf mino maxo $ genTxtNodeSimpleType t typingContext n
   ElementWithComplexTypeDecl n mino maxo t ms -> 
     sizedListOf mino maxo $ mkComplexTypeGen t typingContext n
 
 lookupTypeAndMkGen :: QName -> Schema -> Name -> Q.Gen Node
 lookupTypeAndMkGen typeName typingContext elmName =
-  -- First see if typeName refers to a SimpleType
   case findByMaybeQName typeName (simpleTypes typingContext) of
-    Just simpleType -> case simpleType of 
-      SimpleType maybeName restrictionBaseType restriction ->
-        error $ "TODO: Add support for SimpleType generation"
-    -- Then see if typeName refers to a ComplexType
+    Just simpleType -> genTxtNodeSimpleType simpleType typingContext elmName          
     Nothing ->
       case findByMaybeQName typeName (complexTypes typingContext) of
         Just complexType -> mkComplexTypeGen complexType typingContext elmName
@@ -98,12 +109,13 @@ mkComplexTypeGen t typingContext elmName = case t of
     genElmNode elmName sisNodeGens
     where
       sisNodeGens :: [Q.Gen [Node]]
-      sisNodeGens = 
-        map (\si -> 
-              case si of
-                SIElement e -> mkElementGen e typingContext
-                {- TODO Add case for SIChoice-})
-            sequenceItems
+      sisNodeGens = map (\si -> case si of
+                                  SIElement e -> mkElementGen e typingContext
+                                  SIChoice  c -> mkChoiceGen  c typingContext)
+                        sequenceItems
+
+mkChoiceGen :: Choice -> Schema -> Q.Gen [Node]
+mkChoiceGen = error "Choice is not yet supported!"
 
 ------------------------------------------------------------------------
 -- Generators for XML document types
@@ -121,21 +133,76 @@ genElmNode n sisNodeGens = genElmNodeAux sisNodeGens []
            genElmNodeAux (tail gens) (nodes ++ n)
 
 genTxtNodeString :: Name -> Q.Gen Node
-genTxtNodeString n = do s <- genString
-                        return $ TxtNode n [] s
+genTxtNodeString n = 
+  do s <- genString
+     return $ TxtNode n [] s
 
--- TODO Replace this wasteful implementation by one that directly generates a valid Base64 string
+-- TODO Replace this wasteful impl by one that directly generates a valid Base64 string
 genTxtNodeBase64String :: Name -> Q.Gen Node
-genTxtNodeBase64String n = do s <- genString
-                              return $ TxtNode n [] $ B64.encode s
+genTxtNodeBase64String n = 
+  do s <- genString
+     return $ TxtNode n [] $ B64.encode s
 
 genTxtNodeInteger :: Name -> Q.Gen Node
-genTxtNodeInteger n = do (s::Int) <- Q.arbitrary
-                         return $ TxtNode n [] $ show s
+genTxtNodeInteger n = 
+  do (s::Int) <- Q.arbitrary
+     return $ TxtNode n [] $ show s
 
+genTxtNodeSimpleType :: SimpleType -> Schema -> Name -> Q.Gen Node 
+genTxtNodeSimpleType t typingContext n =
+  do s <- genSimpleType t typingContext
+     return $ TxtNode n [] s
+
+genSimpleType :: SimpleType -> Schema -> G.Gen String
+genSimpleType t typingContext   = 
+  case t of
+    -- TODO Check that this is really used
+    (SimpleTypeRestriction (Just (QName prefix name)) baseType restriction) ->
+      case restriction of
+        Enumeration vs -> Q.oneof $ map return vs
+        Pattern      r -> genMatch r
+        MaxExclusive i -> error "MaxExclusive generation not implemented"
+    (SimpleTypeRestriction Nothing baseType restriction) ->
+      case restriction of
+        Enumeration vs -> Q.oneof $ map return vs
+        Pattern      r -> genMatch r
+        MaxExclusive i -> error "MaxExclusive generation not implemented"
+    -- (SimpleTypeList        (Maybe QName) ItemType) ->
+    -- (SimpleTypeUnion       (Maybe QName) [SimpleType]) ->
+
+genMatch :: R.RegEx -> Q.Gen String
+genMatch r = case r of
+  R.Literal c -> case c of
+    '.' -> Q.elements stringCharacters >>= \c -> return [c] 
+    c   -> return [c]
+  R.SCEscape c -> return [c]
+  R.TCEscape c -> 
+    case c of
+      --'s'
+      --'S'
+      --'i'
+      --'I'
+      --'c'
+      --'C'
+      'd' -> Q.elements digitCharacters >>= \c -> return [c]
+      'D' -> Q.elements nonDigitCharacters >>= \c -> return [c]
+      --'w'
+      --'W'
+  R.Sequence rs -> 
+    do ms <- sequence $ map genMatch rs
+       return $ concat ms
+  R.Choice rs -> Q.oneof $ map genMatch rs 
+  R.Repeat (min, Just max) rr -> 
+    do ms <- sizedListOf (Occurs min) (Occurs max) $ genMatch rr
+       return $ concat ms
+  R.Repeat (min, Nothing) rr -> 
+    do init <- Q.vectorOf min $ genMatch rr
+       rest <- Q.listOf       $ genMatch rr
+       return $ concat init ++ concat rest
+  
 -- TODO Add map of string chars to generate with as optional CLI parameter
 genString :: Q.Gen String
-genString = do s <- Q.listOf $ Q.elements ['\32'..'\254']
+genString = do s <- Q.listOf $ Q.elements stringCharacters
                return $ xmlEncode s
 
 xmlEncode :: String -> String

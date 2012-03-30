@@ -4,6 +4,7 @@ module Schema where
 
 import XmlParser
 import qualified Data.Maybe as M
+import qualified RegEx as R
 
 ------------------------------------------------------------------------
 -- Type declarations
@@ -28,22 +29,27 @@ type MinOccurs = Occurs
 type MaxOccurs = Occurs
 
 data Element 
-  = ElementRef Name MinOccurs MaxOccurs (Maybe SubstitutionGroup)
-  | ElementWithTypeRef Name Type MinOccurs MaxOccurs (Maybe SubstitutionGroup)
-  | ElementWithSimpleTypeDecl Name SimpleType (Maybe SubstitutionGroup)
+  = ElementRef                 Name MinOccurs MaxOccurs             (Maybe SubstitutionGroup)
+  | ElementWithTypeRef         Name MinOccurs MaxOccurs Type        (Maybe SubstitutionGroup)
+  | ElementWithSimpleTypeDecl  Name MinOccurs MaxOccurs SimpleType  (Maybe SubstitutionGroup)
   | ElementWithComplexTypeDecl Name MinOccurs MaxOccurs ComplexType (Maybe SubstitutionGroup)
   deriving (Eq,Show)
 
 -- Ignoring this for now, don't think it affects XML generation
 data SubstitutionGroup = SubstitutionGroup deriving (Eq,Show)
 
-data SimpleType = SimpleType (Maybe QName) RestrictionBaseType Restriction deriving (Eq,Show)
+data SimpleType 
+  = SimpleTypeRestriction (Maybe QName) BaseType Restriction 
+  | SimpleTypeList        (Maybe QName) ItemType
+  | SimpleTypeUnion       (Maybe QName) [SimpleType]
+  deriving (Eq,Show)
 
 data Restriction = Enumeration [Value]
-                 | Pattern Value
+                 | Pattern R.RegEx
                  | MaxExclusive Integer
                  deriving (Eq,Show)
-type RestrictionBaseType = QName 
+type BaseType = QName
+type ItemType = QName
 
 data ComplexType
   = ComplexTypeAll            (Maybe QName) All            [Attribute]
@@ -90,16 +96,18 @@ instance MaybeQNamed ComplexType where
   qname (ComplexTypeComplexContent mqn _ _) = mqn
 
 instance MaybeQNamed SimpleType where
-  qname (SimpleType mqn _ _) = mqn
+  qname (SimpleTypeRestriction mqn _ _) = mqn
+  qname (SimpleTypeList        mqn _)   = mqn
+  qname (SimpleTypeUnion       mqn _)   = mqn
 
 instance Show QName where
   show (QName nsp n) | nsp == "" = n
                      | otherwise = nsp ++ ":" ++ n
                      
 instance Named Element where
-  name (ElementRef n _ _ _)                   = n
-  name (ElementWithTypeRef n _ _ _ _)         = n
-  name (ElementWithSimpleTypeDecl n _ _)      = n
+  name (ElementRef                 n _ _ _)   = n
+  name (ElementWithTypeRef         n _ _ _ _) = n
+  name (ElementWithSimpleTypeDecl  n _ _ _ _) = n
   name (ElementWithComplexTypeDecl n _ _ _ _) = n
 
 instance Named QName where
@@ -108,10 +116,10 @@ instance Named QName where
 instance Renamable Element where
   rename (ElementRef n mino maxo msg) nn = 
     ElementRef nn mino maxo msg
-  rename (ElementWithTypeRef n t mino maxo msg) nn = 
-    ElementWithTypeRef nn t mino maxo msg
-  rename (ElementWithSimpleTypeDecl n t msg) nn = 
-    ElementWithSimpleTypeDecl nn t msg
+  rename (ElementWithTypeRef n mino maxo t msg) nn = 
+    ElementWithTypeRef nn mino maxo t msg
+  rename (ElementWithSimpleTypeDecl n t mino maxo msg) nn = 
+    ElementWithSimpleTypeDecl nn t mino maxo msg
   rename (ElementWithComplexTypeDecl n mino maxo t msg) nn = 
     ElementWithComplexTypeDecl nn mino maxo t msg
 
@@ -129,10 +137,10 @@ xmlDocToSchema
   Schema 
   { targetNameSpace =  lookupE "targetNamespace" as
   , elements        = [ nodeToElement        t n | n <- elms, name n == "xsd:element" ]
-  , simpleTypes     = [ nodeToSimpleType     n   | n <- elms, name n == "xsd:simpleType" ]
+  , simpleTypes     = [ nodeToSimpleType     t n | n <- elms, name n == "xsd:simpleType" ]
   , complexTypes    = [ nodeToComplexType    t n | n <- elms, name n == "xsd:complexType" ]
   , groups          = [ nodeToGroup          t n | n <- elms, name n == "xsd:group" ]
-  , attributeGroups = [ nodeToAttributeGroup n   | n <- elms, name n == "xsd:attributeGroup" ]
+  , attributeGroups = [ nodeToAttributeGroup t n | n <- elms, name n == "xsd:attributeGroup" ]
   }
   where
     t = getTargetNamespacePrefix x
@@ -157,15 +165,17 @@ nodeToElement tns (ElmNode n as (ElmList els)) =
       (nodeToComplexType tns (head els))
       Nothing
     "xsd:simpleType" -> ElementWithSimpleTypeDecl elmName
-      (nodeToSimpleType (head els))
+      (minOccurs as)
+      (maxOccurs as)
+      (nodeToSimpleType tns (head els))
       Nothing        
 nodeToElement tns (TxtNode n as s) = undefined
 nodeToElement tns node@(EmpNode n as) = 
   case getAttrValue "ref" node of
     ""  -> ElementWithTypeRef (lookupE "name" as) 
-                              (stringToQName $ lookupE "type" as)
                               (minOccurs as)
                               (maxOccurs as)
+                              (stringToQName $ lookupE "type" as)
                               Nothing
     ref -> ElementRef ref 
                       (minOccurs as)
@@ -173,15 +183,15 @@ nodeToElement tns node@(EmpNode n as) =
                       Nothing
 
 -- Attribute
-nodeToAttribute :: Node -> Attribute
-nodeToAttribute node@(ElmNode n as (ElmList els)) = 
+nodeToAttribute :: Namespace -> Node -> Attribute
+nodeToAttribute tns node@(ElmNode n as (ElmList els)) = 
   case name (head els) of
   "xsd:simpleType" -> AttributeWithTypeDecl n
-    (nodeToSimpleType (head els))
+    (nodeToSimpleType tns (head els))
     (getUse node)
   v -> error $ show $head els
-nodeToAttribute (TxtNode n as s) = undefined
-nodeToAttribute node@(EmpNode n as) = 
+nodeToAttribute tns (TxtNode n as s) = undefined
+nodeToAttribute tns node@(EmpNode n as) = 
   case getAttrValue "ref" node of
     ""  -> AttributeWithTypeRef (lookupE "name" as) 
                                 (stringToQName $ lookupE "type" as)
@@ -196,27 +206,30 @@ getUse node = case getAttrValue "use" node of
                 _ -> Optional
 
 -- SimpleType
-nodeToSimpleType :: Node -> SimpleType
-nodeToSimpleType node@(ElmNode n as (ElmList els)) =
-  SimpleType (fmap stringToQName $ lookup "name" as)
-             (stringToQName $ lookupE "base" ras) -- RestrictionBaseType
-             restriction
-             where
-               rnode@(ElmNode _ ras rels) = getChild "xsd:restriction" node
-               restriction = case name (head $ elems rnode) of
-                 "xsd:pattern" -> 
-                   Pattern $ getAttrValue "value" $ getChild "xsd:pattern" rnode
-                 "xsd:enumeration" -> 
-                   Enumeration $ map (getAttrValue "value") $ elems rnode
-                 "xsd:maxExclusive" -> 
-                   MaxExclusive $ read $ getAttrValue "value" $ head $ elems rnode
---nodeToSimpleType (EmpNode n as) = undefined
+nodeToSimpleType :: Namespace -> Node -> SimpleType
+nodeToSimpleType tns node@(ElmNode n as (ElmList els)) =
+  let ElmNode tn tas (ElmList tels) = head els in
+  case tn of
+    "xsd:restriction" -> SimpleTypeRestriction
+      (fmap stringToQName $ lookup "name" as)
+      (stringToQName $ lookupE "base" ras)
+      restriction
+      where
+        rnode@(ElmNode _ ras rels) = getChild "xsd:restriction" node
+        restriction = case name (head $ elems rnode) of
+          "xsd:pattern" -> 
+             Pattern $ R.readRegEx $ getAttrValue "value" $ getChild "xsd:pattern" rnode
+          "xsd:enumeration" -> 
+             Enumeration $ map (getAttrValue "value") $ elems rnode
+          "xsd:maxExclusive" -> 
+             MaxExclusive $ read $ getAttrValue "value" $ head $ elems rnode
+    e -> error $ "Failed to convert node to SimpleType: " ++ e
 
 -- | ComplexType
 -- | The Name parameter is the target namespace of the schema, to which the type will be added
 nodeToComplexType :: Namespace -> Node -> ComplexType
 nodeToComplexType tns node@(ElmNode n as (ElmList els)) =
-  let atts    = [ nodeToAttribute an | an <- elems node, name an == "xsd:attribute" ];
+  let atts    = [ nodeToAttribute tns an | an <- elems node, name an == "xsd:attribute" ];
       elmName = maybeStringToMaybeQName tns $ lookup "name" as in
   case name (head els) of
   "xsd:all" -> ComplexTypeAll elmName 
@@ -269,10 +282,10 @@ nodeToGroup tns node@(ElmNode n as (ElmList els)) =
     v -> error $ show $ head els
 
 -- AttributeGroup
-nodeToAttributeGroup :: Node -> AttributeGroup
-nodeToAttributeGroup node@(ElmNode n as (ElmList els)) =
+nodeToAttributeGroup :: Namespace -> Node -> AttributeGroup
+nodeToAttributeGroup tns node@(ElmNode n as (ElmList els)) = --TODO Take into acount tns
   AttributeGroup (lookupE "name" $ as)
-                 [ nodeToAttribute an | an <- elems node, name an == "xsd:attribute" ]
+                 [ nodeToAttribute tns an | an <- elems node, name an == "xsd:attribute" ]
 
 ------------------------------------------------------------------------
 -- Utility functions
@@ -304,7 +317,7 @@ findByName n (e:es) | name e == n = Just e
 findByMaybeQName :: MaybeQNamed a => QName -> [a] -> Maybe a
 findByMaybeQName _ [] = Nothing
 findByMaybeQName n (e:es) | M.fromJust (qname e) == n = Just e
-                          | otherwise           = findByMaybeQName n es
+                          | otherwise                 = findByMaybeQName n es
 
 stringToQName :: String -> QName
 stringToQName "" = QName ""     ""

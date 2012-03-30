@@ -213,6 +213,8 @@ getAttrName v (ElmNode _ attrs _) = look v attrs
 
 addAttribute :: Node -> Attr -> Node
 addAttribute (ElmNode n as el) a = ElmNode n (a:as) el
+addAttribute (TxtNode n as el) a = TxtNode n (a:as) el
+addAttribute (EmpNode n as)    a = EmpNode n (a:as)
 
 ------
 

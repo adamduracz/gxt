@@ -31,7 +31,7 @@ main = do args <- getArgs
           randomXmlDocs <- generateTestData numberOfRuns gen
           transformedDocs <- transformXmls randomXmlDocs "transform.xsl"
           let docsToValidate = map (readTree . exitCode) transformedDocs
-          -- mapM_ (putStrLn . show) docsToValidate
+          --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchema
           mapM_ (putStrLn . show) valitationResults
           return ()
