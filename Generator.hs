@@ -84,6 +84,7 @@ mkElementGen e typingContext = case e of
      -- Built in XML Schema base types
       "xsd" -> case name of
         "string"       -> sizedListOf mino maxo $ genTxtNodeString n
+        "decimal"      -> sizedListOf mino maxo $ genTxtNodeDecimal n
         "integer"      -> sizedListOf mino maxo $ genTxtNodeInteger n
         "base64Binary" -> sizedListOf mino maxo $ genTxtNodeBase64String n
         other     -> error $ "Unsupported schema base type: " ++ (show t)
@@ -132,6 +133,15 @@ genElmNode n sisNodeGens = genElmNodeAux sisNodeGens []
         do n <- head gens
            genElmNodeAux (tail gens) (nodes ++ n)
 
+-- TODO Implement this more efficiently!
+genTxtNodeDecimal :: Name -> Q.Gen Node
+genTxtNodeDecimal n = genTxtNode n [] $ genMatch $ R.readRegEx "(\\+|-)?\\d*(\\.)?\\d+"
+
+genTxtNode :: (Show a) => Name -> [Attr] -> Q.Gen a -> Q.Gen Node
+genTxtNode n as gen = 
+  do s <- gen
+     return $ TxtNode n [] $ show s
+
 genTxtNodeString :: Name -> Q.Gen Node
 genTxtNodeString n = 
   do s <- genString
@@ -144,9 +154,12 @@ genTxtNodeBase64String n =
      return $ TxtNode n [] $ B64.encode s
 
 genTxtNodeInteger :: Name -> Q.Gen Node
-genTxtNodeInteger n = 
-  do (s::Int) <- Q.arbitrary
-     return $ TxtNode n [] $ show s
+genTxtNodeInteger n = genTxtNode n [] genInt
+
+genInt :: Q.Gen Int
+genInt =
+  do (i::Int) <- Q.arbitrary
+     return i 
 
 genTxtNodeSimpleType :: SimpleType -> Schema -> Name -> Q.Gen Node 
 genTxtNodeSimpleType t typingContext n =

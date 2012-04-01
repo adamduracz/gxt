@@ -1,3 +1,10 @@
+
+------------------------------------------------------------------------
+-- TODO
+-- - Add option to write test cases which fail validation to disk
+-- - Add an error count to the report, and perhaps a digest of all the errors?
+------------------------------------------------------------------------
+
 module Main where
 
 import Generator hiding (main)
@@ -6,7 +13,11 @@ import XmlParser
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
-import System (ExitCode, getArgs, system)
+import System
+  ( ExitCode (ExitSuccess, ExitFailure)
+  , getArgs
+  , system
+  )
 import System.Process (readProcessWithExitCode)
 import System.Random
   ( Random
@@ -20,23 +31,50 @@ type ProcessInput  = (FilePath, [String], String)
 type ProcessOutput = (ExitCode,  String , String)
 
 -- TODO Extract these as command line parameters
-inSchema     = "in.xsd"
-outSchema    = "out.xsd"
-numberOfRuns = 10
+inSchemaPath  = "in2.xsd"
+outSchemaPath = "out2.xsd"
+xslPath       = "transform2.xsl"
+numberOfRuns  = 10
+
+mainG = do args <- getArgs
+           s <- readFile inSchemaPath
+           let schema = readSchema s
+               gen = mkSchemaGen schema "priceList"
+           randomXmlDocs <- generateTestData 1 gen
+           transformedDocs <- transformXmls randomXmlDocs xslPath
+           let docsToValidate = map (readTree . exitCode) transformedDocs
+           mapM_ (putStrLn . show) docsToValidate
+           return ()
+           where
+             exitCode (_,e,_) = e
 
 main = do args <- getArgs
-          s <- readFile inSchema
+          s <- readFile inSchemaPath
           let schema = readSchema s
               gen = mkSchemaGen schema "priceList"
           randomXmlDocs <- generateTestData numberOfRuns gen
-          transformedDocs <- transformXmls randomXmlDocs "transform.xsl"
+          transformedDocs <- transformXmls randomXmlDocs xslPath
           let docsToValidate = map (readTree . exitCode) transformedDocs
           --mapM_ (putStrLn . show) docsToValidate
-          valitationResults <- validateXmls docsToValidate outSchema
-          mapM_ (putStrLn . show) valitationResults
+          valitationResults <- validateXmls docsToValidate outSchemaPath
+          --mapM_ (putStrLn . show) valitationResults
+          putStrLn $ show $ makeReport valitationResults numberOfRuns
           return ()
           where
             exitCode (_,e,_) = e
+
+makeReport :: [ProcessOutput] -> Int -> String
+makeReport po numberOfRuns = case mergeValidationResults po of
+  Nothing  -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
+  (Just e) -> "Error found: " ++ e
+  where
+    mergeValidationResults :: [ProcessOutput] -> (Maybe String)
+    mergeValidationResults pos = foldr mergeFunction Nothing pos
+    mergeFunction :: ProcessOutput -> Maybe String -> Maybe String
+    mergeFunction _                               p@(Just previousError) = p
+    --TODO Make a better error report, also using syserr if it contains something interesting
+    mergeFunction (ExitSuccess,   _,      _)      _                      = Nothing
+    mergeFunction (ExitFailure _, sysout, syserr) _                      = Just $ sysout ++ syserr
 
 transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
