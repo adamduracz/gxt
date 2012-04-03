@@ -7,6 +7,8 @@
 ------------------------------------------------------------------------
 -- TODO
 -- - Implement generation of remaining two-character escapes
+-- - Handing of schema hierarchies
+--   - Proper handling of namespaces
 ------------------------------------------------------------------------
 
 module Generator where
@@ -29,30 +31,12 @@ digitCharacters    = ['0'..'9']
 nonDigitCharacters = [ c | c <- stringCharacters, not $ c `elem` digitCharacters ] 
 
 ------------------------------------------------------------------------
--- Test functions
-------------------------------------------------------------------------
-
-main = do s <- readFile "out.xsd"
-          let schema@Schema { targetNameSpace = name
-                            , attributes      = as
-                            , elements        = es
-                            , simpleTypes     = sts
-                            , complexTypes    = cts
-                            , groups          = gs
-                            , attributeGroups = ags
-                            } = readSchema s
-              gen = genSchema schema "priceList"
-          Q.sample gen
-          return ()
-
-------------------------------------------------------------------------
 -- Generators for XML schema types
 ------------------------------------------------------------------------
 
 genSchema :: Schema -> Name -> Q.Gen XmlDoc
 genSchema s rootElementName = 
   do r <- genElement rootElement s
-     -- TODO Figure out how to do proper handling of namespaces
      -- TODO Enforce assumption that maxOccurs of rootElement is 1
      let re = head r
          (QName prefix _) = stringToQName $ name re

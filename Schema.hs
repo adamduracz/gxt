@@ -309,10 +309,11 @@ makeItem tns node@(ElmNode _ _ (ElmList els)) =
     "xsd:group"    -> IGroup    $ nodeToGroup    tns node
     "xsd:choice"   -> IChoice   $ nodeToChoice   tns node
     "xsd:sequence" -> ISequence $ nodeToSequence tns node
-    "xsd:any"      -> IAny      $ nodeToAny          node
-
     s -> error $ "Unsupported item: " ++ show s
-makeItem tns node@(EmpNode _ _) = IElement $ nodeToElement tns node
+makeItem tns node@(EmpNode _ _) = 
+  case name node of
+    "xsd:element"  -> IElement  $ nodeToElement  tns node
+    "xsd:any"      -> IAny      $ nodeToAny          node
 
 nodeToChoice :: Namespace -> Node -> Choice
 nodeToChoice tns node@(ElmNode _ as (ElmList els)) = Choice $ map (makeItem tns) els 
