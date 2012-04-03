@@ -161,16 +161,27 @@ genComplexType t typingContext elmName = case t of
 genItem :: Item -> Schema -> Q.Gen [Node]
 genItem i s =
   case i of
-    IElement  e -> genElement e s
-    IGroup    g -> error "Unimplemented function: genGroup"
-    IChoice   c -> genChoice  c s
-    ISequence s -> error "Unimplemented function: genSequence"
-    IAny      a -> error "Unimplemented function: genAny"
+    IElement  x -> genElement  x s
+    IGroup    x -> error "Unimplemented function: genGroup"
+    IChoice   x -> genChoice   x s
+    ISequence x -> genSequence x s
+    IAny      x -> error "Unimplemented function: genAny"
 
 genChoice :: Choice -> Schema -> Q.Gen [Node]
-genChoice (Choice els) s =
-  do c <- Q.oneof $ map (\i -> genItem i s) els 
+genChoice (Choice items) s =
+  do c <- Q.oneof $ map (\i -> genItem i s) items 
      return c
+
+genSequence :: Sequence -> Schema -> Q.Gen [Node]
+genSequence (Sequence items) s = genSequenceAux (map (\i -> genItem i s) items) []
+  where
+    genSequenceAux :: [Q.Gen [Node]] -> [Node] -> Q.Gen [Node]
+    genSequenceAux gens nodes =
+      if null gens
+      then return nodes 
+      else do n <- head gens
+              genSequenceAux (tail gens) (nodes ++ n)
+
 ------------------------------------------------------------------------
 -- Generators for XML document types
 ------------------------------------------------------------------------
