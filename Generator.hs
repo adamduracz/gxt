@@ -68,19 +68,20 @@ genSchema s rootElementName =
              ("p:" ++ rootElementName) -- TODO Figure out how to do proper handling of namespaces
 
 genElement :: Element -> Schema -> Q.Gen [Node]
-genElement e typingContext = case e of
+genElement e s = case e of
   -- TODO Implement substitution groups
-  ElementRef n _ _ _ -> return [TxtNode n [] ""] -- TODO
+  ElementRef ref mino maxo msg ->
+    genElement (lookupElement ref s) s 
   ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     case prefix of
-     -- Built in XML Schema base types
+      -- Built in XML Schema base types
       "xsd" -> sizedListOf mino maxo $ genTxtNode n [] $ genBaseType name
       -- Types defined in the schema
-      _     -> sizedListOf mino maxo $ lookupTypeGen t typingContext n
+      _     -> sizedListOf mino maxo $ lookupTypeGen t s n
   ElementWithSimpleTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ genTxtNodeSimpleType t typingContext n
+    sizedListOf mino maxo $ genTxtNodeSimpleType t s n
   ElementWithComplexTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ genComplexType t typingContext n
+    sizedListOf mino maxo $ genComplexType t s n
 
 genBaseType :: String -> Q.Gen String
 genBaseType typeName = 
@@ -97,7 +98,7 @@ lookupSimpleTypeGen typeName typingContext =
      Just simpleType -> genSimpleType simpleType typingContext
      Nothing -> error $ "SimpleType " ++ show typeName ++ " not found in schema!"
 
-lookupTypeGen :: QName -> Schema -> Name -> Q.Gen Node
+lookupTypeGen :: QName -> Schema -> QName -> Q.Gen Node
 lookupTypeGen typeName typingContext elmName =
   case findByMaybeQName typeName (simpleTypes typingContext) of
     Just simpleType -> genTxtNode elmName [] $ genSimpleType simpleType typingContext          
@@ -137,7 +138,7 @@ genAttribute a s = case a of
              else return Nothing
         Prohibited -> return Nothing
 
-genComplexType :: ComplexType -> Schema -> Name -> Q.Gen Node
+genComplexType :: ComplexType -> Schema -> QName -> Q.Gen Node
 genComplexType t typingContext elmName = case t of
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
     genElmNode elmName sisNodeGens attrGens
@@ -157,7 +158,7 @@ genChoice = error "Choice is not yet supported!" -- TODO Implement Choice
 -- Generators for XML document types
 ------------------------------------------------------------------------
 
-genElmNode :: Name -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Q.Gen Node
+genElmNode :: QName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Q.Gen Node
 genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens []
   where
     genElmNodeAux :: [Q.Gen [Node]]       -> [Node] 
@@ -166,7 +167,7 @@ genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens
     genElmNodeAux nGens nodes aGens attrs =
       if null aGens then
         if null nGens then
-          return $ ElmNode name attrs $ ElmList $ nodes 
+          return $ ElmNode (show name) attrs $ ElmList $ nodes 
         else
           do n <- head nGens
              genElmNodeAux (tail nGens) (nodes ++ n) aGens attrs
@@ -176,10 +177,10 @@ genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens
                                                      Just a  -> attrs ++ [a]
                                                      Nothing -> attrs)
 
-genTxtNode :: Name -> [Attr] -> Q.Gen String -> Q.Gen Node
+genTxtNode :: QName -> [Attr] -> Q.Gen String -> Q.Gen Node
 genTxtNode n as gen = 
   do s <- gen
-     return $ TxtNode n [] $ xmlEncode s
+     return $ TxtNode (show n) [] $ xmlEncode s
 
 -- TODO Implement this more efficiently!
 genDecimal :: Q.Gen String
@@ -195,10 +196,10 @@ genInt :: Q.Gen String
 genInt = do (i::Int) <- Q.arbitrary
             return $ show i
 
-genTxtNodeSimpleType :: SimpleType -> Schema -> Name -> Q.Gen Node 
+genTxtNodeSimpleType :: SimpleType -> Schema -> QName -> Q.Gen Node 
 genTxtNodeSimpleType t typingContext n =
   do s <- genSimpleType t typingContext
-     return $ TxtNode n [] s
+     return $ TxtNode (show n) [] s
 
 genSimpleType :: SimpleType -> Schema -> G.Gen String
 genSimpleType t typingContext   = 
