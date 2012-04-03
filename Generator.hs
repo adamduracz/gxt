@@ -173,37 +173,20 @@ genChoice (Choice items) s =
      return c
 
 genSequence :: Sequence -> Schema -> Q.Gen [Node]
-genSequence (Sequence items) s = genSequenceAux (map (\i -> genItem i s) items) []
-  where
-    genSequenceAux :: [Q.Gen [Node]] -> [Node] -> Q.Gen [Node]
-    genSequenceAux gens nodes =
-      if null gens
-      then return nodes 
-      else do n <- head gens
-              genSequenceAux (tail gens) (nodes ++ n)
+genSequence (Sequence items) s = concatGen $ map (\i -> genItem i s) items
 
 ------------------------------------------------------------------------
 -- Generators for XML document types
 ------------------------------------------------------------------------
 
 genElmNode :: QName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Schema -> Q.Gen Node
-genElmNode name childNodeGens attrGens s = genElmNodeAux childNodeGens [] attrGens []
-  where
-    genElmNodeAux :: [Q.Gen [Node]]       -> [Node] 
-                  -> [Q.Gen (Maybe Attr)] -> [Attr] 
-                  ->  Q.Gen Node
-    genElmNodeAux nGens nodes aGens attrs =
-      if null aGens then
-        if null nGens then
-          return $ ElmNode (reduceQName name s) attrs $ ElmList $ nodes 
-        else
-          do n <- head nGens
-             genElmNodeAux (tail nGens) (nodes ++ n) aGens attrs
-      else       
-        do ma <- head aGens
-           genElmNodeAux nGens nodes (tail aGens) (case ma of 
-                                                     Just a  -> attrs ++ [a]
-                                                     Nothing -> attrs)
+genElmNode name childNodeGens attributeGens s = 
+  do attrs <- foldGen attributeGens 
+                      (\ma as -> case ma of
+                                   Just a  -> as ++ [a]
+                                   Nothing -> as)
+     nodes <- concatGen childNodeGens
+     return $ ElmNode (reduceQName name s) attrs $ ElmList $ nodes
 
 genTxtNode :: Name -> [Attr] -> Q.Gen String -> Q.Gen Node
 genTxtNode n as gen = 
@@ -318,6 +301,18 @@ showGen :: (Show a) => Q.Gen a -> Q.Gen String
 showGen gen = 
   do s <- gen
      return $ show s
+
+concatGen :: [Q.Gen [a]] -> Q.Gen [a]
+concatGen gs = foldGen gs (\v vs -> vs ++ v)
+
+foldGen :: [Q.Gen b] -> (b -> [a] -> [a]) -> Q.Gen [a]
+foldGen gs f = aux gs []
+  where
+    aux gens vals =
+      if null gens
+      then return vals 
+      else do v <- head gens
+              aux (tail gens) (f v vals)
 
 ------------------------------------------------------------------------
 -- Utility generators
