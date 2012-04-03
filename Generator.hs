@@ -54,18 +54,18 @@ genSchema s rootElementName =
   do r <- genElement rootElement s
      -- TODO Figure out how to do proper handling of namespaces
      -- TODO Enforce assumption that maxOccurs of rootElement is 1
-     let r' = addAttribute (head r) ("xmlns:p", targetNameSpace s)
+     let re = head r
+         (QName prefix _) = stringToQName $ name re
+         r' = addAttribute re ("xmlns:" ++ prefix, targetNameSpace s)
      return XmlDoc
             { version  = "1.0" -- TODO These things should be taken from the Schema
             , encoding = "ISO-8859-1"
             , root = r'
             }
   where
-    rootElement =
-      rename (case findByName rootElementName $ elements s of
-                Nothing -> error $ "Root element '" ++ rootElementName ++ "' not found in schema!"
-                Just e  -> e) 
-             ("p:" ++ rootElementName) -- TODO Figure out how to do proper handling of namespaces
+    rootElement = (case findByName rootElementName $ elements s of
+                    Nothing -> error $ "Root element '" ++ rootElementName ++ "' not found in schema!"
+                    Just e  -> e)
 
 genElement :: Element -> Schema -> Q.Gen [Node]
 genElement e s = case e of
@@ -75,13 +75,22 @@ genElement e s = case e of
   ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     case prefix of
       -- Built in XML Schema base types
-      "xsd" -> sizedListOf mino maxo $ genTxtNode n [] $ genBaseType name
+      "xsd" -> sizedListOf mino maxo $ genTxtNode (reduceQName n s) [] $ genBaseType name
       -- Types defined in the schema
       _     -> sizedListOf mino maxo $ lookupTypeGen t s n
   ElementWithSimpleTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ genTxtNodeSimpleType t s n
+    sizedListOf mino maxo $ genTxtNodeSimpleType t s (reduceQName n s)
   ElementWithComplexTypeDecl n mino maxo t ms -> 
     sizedListOf mino maxo $ genComplexType t s n
+  where
+
+-- | Reduces a QName to a Name.
+-- | If the element is top-level (referenced or the root) it keeps the prefix, otherwise not.
+reduceQName :: QName -> Schema -> Name
+reduceQName n s =
+  case findByQName n (elements s) of
+    Nothing -> name n
+    Just _  -> show n             
 
 genBaseType :: String -> Q.Gen String
 genBaseType typeName = 
@@ -101,7 +110,8 @@ lookupSimpleTypeGen typeName typingContext =
 lookupTypeGen :: QName -> Schema -> QName -> Q.Gen Node
 lookupTypeGen typeName typingContext elmName =
   case findByMaybeQName typeName (simpleTypes typingContext) of
-    Just simpleType -> genTxtNode elmName [] $ genSimpleType simpleType typingContext          
+    Just simpleType -> 
+      genTxtNode (reduceQName elmName typingContext) [] $ genSimpleType simpleType typingContext          
     Nothing ->
       case findByMaybeQName typeName (complexTypes typingContext) of
         Just complexType -> genComplexType complexType typingContext elmName
@@ -141,7 +151,7 @@ genAttribute a s = case a of
 genComplexType :: ComplexType -> Schema -> QName -> Q.Gen Node
 genComplexType t typingContext elmName = case t of
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
-    genElmNode elmName sisNodeGens attrGens
+    genElmNode elmName sisNodeGens attrGens typingContext
     where
       sisNodeGens :: [Q.Gen [Node]]
       sisNodeGens = map (\si -> case si of
@@ -158,8 +168,8 @@ genChoice = error "Choice is not yet supported!" -- TODO Implement Choice
 -- Generators for XML document types
 ------------------------------------------------------------------------
 
-genElmNode :: QName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Q.Gen Node
-genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens []
+genElmNode :: QName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Schema -> Q.Gen Node
+genElmNode name childNodeGens attrGens s = genElmNodeAux childNodeGens [] attrGens []
   where
     genElmNodeAux :: [Q.Gen [Node]]       -> [Node] 
                   -> [Q.Gen (Maybe Attr)] -> [Attr] 
@@ -167,7 +177,7 @@ genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens
     genElmNodeAux nGens nodes aGens attrs =
       if null aGens then
         if null nGens then
-          return $ ElmNode (show name) attrs $ ElmList $ nodes 
+          return $ ElmNode (reduceQName name s) attrs $ ElmList $ nodes 
         else
           do n <- head nGens
              genElmNodeAux (tail nGens) (nodes ++ n) aGens attrs
@@ -177,10 +187,10 @@ genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens
                                                      Just a  -> attrs ++ [a]
                                                      Nothing -> attrs)
 
-genTxtNode :: QName -> [Attr] -> Q.Gen String -> Q.Gen Node
+genTxtNode :: Name -> [Attr] -> Q.Gen String -> Q.Gen Node
 genTxtNode n as gen = 
   do s <- gen
-     return $ TxtNode (show n) [] $ xmlEncode s
+     return $ TxtNode n [] $ xmlEncode s
 
 -- TODO Implement this more efficiently!
 genDecimal :: Q.Gen String
@@ -196,10 +206,10 @@ genInt :: Q.Gen String
 genInt = do (i::Int) <- Q.arbitrary
             return $ show i
 
-genTxtNodeSimpleType :: SimpleType -> Schema -> QName -> Q.Gen Node 
+genTxtNodeSimpleType :: SimpleType -> Schema -> Name -> Q.Gen Node 
 genTxtNodeSimpleType t typingContext n =
   do s <- genSimpleType t typingContext
-     return $ TxtNode (show n) [] s
+     return $ TxtNode n [] s
 
 genSimpleType :: SimpleType -> Schema -> G.Gen String
 genSimpleType t typingContext   = 

@@ -30,10 +30,10 @@ type MinOccurs = Occurs
 type MaxOccurs = Occurs
 
 data Element 
-  = ElementRef                 Name MinOccurs MaxOccurs             (Maybe SubstitutionGroup)
-  | ElementWithTypeRef         Name MinOccurs MaxOccurs Type        (Maybe SubstitutionGroup)
-  | ElementWithSimpleTypeDecl  Name MinOccurs MaxOccurs SimpleType  (Maybe SubstitutionGroup)
-  | ElementWithComplexTypeDecl Name MinOccurs MaxOccurs ComplexType (Maybe SubstitutionGroup)
+  = ElementRef                 Ref   MinOccurs MaxOccurs             (Maybe SubstitutionGroup)
+  | ElementWithTypeRef         QName MinOccurs MaxOccurs Type        (Maybe SubstitutionGroup)
+  | ElementWithSimpleTypeDecl  QName MinOccurs MaxOccurs SimpleType  (Maybe SubstitutionGroup)
+  | ElementWithComplexTypeDecl QName MinOccurs MaxOccurs ComplexType (Maybe SubstitutionGroup)
   deriving (Eq,Show)
 
 -- Ignoring this for now, don't think it affects XML generation
@@ -89,13 +89,19 @@ data AttributeGroup = AttributeGroup Name [Attribute] deriving (Eq,Show)
 class QNamed a where
   qname :: a -> QName
 
+class MaybeQNamed a where
+  mqname :: a -> Maybe QName
+
+instance QNamed Element where
+  qname (ElementRef                 n _ _ _)   = n
+  qname (ElementWithTypeRef         n _ _ _ _) = n
+  qname (ElementWithSimpleTypeDecl  n _ _ _ _) = n
+  qname (ElementWithComplexTypeDecl n _ _ _ _) = n
+
 instance QNamed Attribute where
   qname (AttributeRef          qn _ )  = qn
   qname (AttributeWithTypeRef  qn _ _) = qn
   qname (AttributeWithTypeDecl qn _ _) = qn
-
-class MaybeQNamed a where
-  mqname :: a -> Maybe QName
 
 instance MaybeQNamed ComplexType where
   mqname (ComplexTypeAll            mqn _ _) = mqn
@@ -114,10 +120,10 @@ instance Show QName where
                      | otherwise = nsp ++ ":" ++ n
                      
 instance Named Element where
-  name (ElementRef                 n _ _ _)   = n
-  name (ElementWithTypeRef         n _ _ _ _) = n
-  name (ElementWithSimpleTypeDecl  n _ _ _ _) = n
-  name (ElementWithComplexTypeDecl n _ _ _ _) = n
+  name (ElementRef                 (QName _ n) _ _ _)   = n
+  name (ElementWithTypeRef         (QName _ n) _ _ _ _) = n
+  name (ElementWithSimpleTypeDecl  (QName _ n) _ _ _ _) = n
+  name (ElementWithComplexTypeDecl (QName _ n) _ _ _ _) = n
 
 instance Named Attribute where
   name (AttributeRef          (QName _ n) _ )  = n
@@ -128,14 +134,14 @@ instance Named QName where
   name (QName _ n) = n
 
 instance Renamable Element where
-  rename (ElementRef n mino maxo msg) nn = 
-    ElementRef nn mino maxo msg
-  rename (ElementWithTypeRef n mino maxo t msg) nn = 
-    ElementWithTypeRef nn mino maxo t msg
-  rename (ElementWithSimpleTypeDecl n t mino maxo msg) nn = 
-    ElementWithSimpleTypeDecl nn t mino maxo msg
-  rename (ElementWithComplexTypeDecl n mino maxo t msg) nn = 
-    ElementWithComplexTypeDecl nn mino maxo t msg
+  rename (ElementRef (QName p n) mino maxo msg) nn = 
+    ElementRef (QName p nn) mino maxo msg
+  rename (ElementWithTypeRef (QName p n) mino maxo t msg) nn = 
+    ElementWithTypeRef (QName p nn) mino maxo t msg
+  rename (ElementWithSimpleTypeDecl (QName p n) t mino maxo msg) nn = 
+    ElementWithSimpleTypeDecl (QName p nn) t mino maxo msg
+  rename (ElementWithComplexTypeDecl (QName p n) mino maxo t msg) nn = 
+    ElementWithComplexTypeDecl (QName p nn) mino maxo t msg
 
 ------------------------------------------------------------------------
 -- Transformations of XML data types into Schema data types
@@ -175,27 +181,25 @@ nodeToElement :: Namespace -> Node -> Element
 nodeToElement tns (ElmNode n as (ElmList els)) =
   let elmName = lookupE "name" as in
   case name (head els) of
-    "xsd:complexType" -> ElementWithComplexTypeDecl elmName
-      (minOccurs as)
-      (maxOccurs as)
+    "xsd:complexType" -> ElementWithComplexTypeDecl
+      (QName tns elmName)
+      (minOccurs as) (maxOccurs as)
       (nodeToComplexType tns (head els))
       Nothing
-    "xsd:simpleType" -> ElementWithSimpleTypeDecl elmName
-      (minOccurs as)
-      (maxOccurs as)
+    "xsd:simpleType" -> ElementWithSimpleTypeDecl
+      (QName tns elmName)
+      (minOccurs as) (maxOccurs as)
       (nodeToSimpleType tns (head els))
       Nothing        
-nodeToElement tns (TxtNode n as s) = undefined
+nodeToElement tns (TxtNode n as s) = error "nodeToelElement is unimplemented for TxtNode"
 nodeToElement tns node@(EmpNode n as) = 
   case getAttrValue "ref" node of
-    ""  -> ElementWithTypeRef (lookupE "name" as) 
-                              (minOccurs as)
-                              (maxOccurs as)
+    ""  -> ElementWithTypeRef (QName tns $ lookupE "name" as)
+                              (minOccurs as) (maxOccurs as)
                               (stringToQName $ lookupE "type" as)
                               Nothing
-    ref -> ElementRef ref 
-                      (minOccurs as)
-                      (maxOccurs as)
+    ref -> ElementRef (stringToQName ref)
+                      (minOccurs as) (maxOccurs as)
                       Nothing
 
 -- Attribute
@@ -222,11 +226,12 @@ nodeToAttribute tns node@(EmpNode n as) =
         (getUse node)
 
 getUse :: Node -> Use
-getUse node = case getAttrValue "use" node of
-                "required" -> Required
-                "optional" -> Optional
-                "prohibited" -> Prohibited
-                _ -> Optional -- TODO Verify that this is indeed default 
+getUse node = 
+  case getAttrValue "use" node of
+    "required"   -> Required
+    "optional"   -> Optional
+    "prohibited" -> Prohibited
+    _            -> Optional -- TODO Verify that this is indeed default 
 
 -- SimpleType
 nodeToSimpleType :: Namespace -> Node -> SimpleType
@@ -349,16 +354,23 @@ findByQName _ [] = Nothing
 findByQName n (e:es) | qname e == n = Just e
                      | otherwise    = findByQName n es
 
+findByMaybeQName :: MaybeQNamed a => QName -> [a] -> Maybe a
+findByMaybeQName _ [] = Nothing
+findByMaybeQName n (e:es) | mqname e == Just n = Just e 
+                          | otherwise          = findByMaybeQName n es
+
 lookupAttribute :: Ref -> Schema -> Attribute
 lookupAttribute ref typingContext =
   case findByQName ref (attributes typingContext) of
     Just a  -> a
     Nothing -> error $ "Attribute " ++ show ref ++ " not found in schema!"
 
-findByMaybeQName :: MaybeQNamed a => QName -> [a] -> Maybe a
-findByMaybeQName _ [] = Nothing
-findByMaybeQName n (e:es) | mqname e == Just n = Just e 
-                          | otherwise          = findByMaybeQName n es
+lookupElement :: Ref -> Schema -> Element
+lookupElement ref typingContext =
+  case findByQName ref (elements typingContext) of
+    Just a  -> a
+    Nothing -> error $ "Element " ++ show ref ++ " not found in schema!"
+
 
 stringToQName :: String -> QName
 stringToQName "" = QName "" ""

@@ -56,9 +56,9 @@ main = do args <- getArgs
           let schema = readSchema s
               gen = genSchema schema "priceList"
           randomXmlDocs <- generateTestData numberOfRuns gen
-          mapM_ (putStrLn . show) randomXmlDocs
+          --mapM_ (putStrLn . show) randomXmlDocs
           transformedDocs <- transformXmls randomXmlDocs xslPath
-          mapM_ (putStrLn . show) randomXmlDocs
+          --mapM_ (putStrLn . show) transformedDocs
           let docsToValidate = map (readTree . exitCode) transformedDocs
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
@@ -78,8 +78,8 @@ makeReport po numberOfRuns = case mergeValidationResults po of
     mergeFunction :: ProcessOutput -> Maybe String -> Maybe String
     mergeFunction _                               p@(Just previousError) = p
     --TODO Make a better error report, also using syserr if it contains something interesting
-    mergeFunction (ExitSuccess,   _,      _)      _                      = Nothing
-    mergeFunction (ExitFailure _, sysout, syserr) _                      = Just $ sysout ++ syserr
+    mergeFunction (ExitSuccess,   _,      _)      _ = Nothing
+    mergeFunction (ExitFailure _, sysout, syserr) _ = Just $ sysout ++ syserr
 
 transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
