@@ -6,7 +6,6 @@
 
 ------------------------------------------------------------------------
 -- TODO
--- - Add generation of attributes
 -- - Implement generation of remaining two-character escapes
 ------------------------------------------------------------------------
 
@@ -19,12 +18,13 @@ import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
 import qualified Codec.Binary.Base64.String as B64
+import Data.List (intersperse)
 
 ------------------------------------------------------------------------
 -- Constants
 ------------------------------------------------------------------------
 
-stringCharacters   = ['\32'..'\254']
+stringCharacters   = ['\32'..'\127'] -- TODO Add handling of full Unicode
 digitCharacters    = ['0'..'9']
 nonDigitCharacters = [ c | c <- stringCharacters, not $ c `elem` digitCharacters ] 
 
@@ -32,27 +32,16 @@ nonDigitCharacters = [ c | c <- stringCharacters, not $ c `elem` digitCharacters
 -- Test functions
 ------------------------------------------------------------------------
 
-elgen :: String -> Q.Gen [Node]
-elgen s = let context@
-                (Schema { targetNameSpace = name
-                       , elements         = es
-                       , simpleTypes      = sts
-                       , complexTypes     = cts
-                       , groups           = gs
-                       , attributeGroups  = ags
-                       }) = readSchema s
-          in mkElementGen (M.fromJust $ findByName "priceList" es) context
-
 main = do s <- readFile "out.xsd"
-          let schema@
-                Schema { targetNameSpace = name
-                       , elements        = es
-                       , simpleTypes     = sts
-                       , complexTypes    = cts
-                       , groups          = gs
-                       , attributeGroups = ags
-                       } = readSchema s
-              gen = mkSchemaGen schema "priceList"
+          let schema@Schema { targetNameSpace = name
+                            , attributes      = as
+                            , elements        = es
+                            , simpleTypes     = sts
+                            , complexTypes    = cts
+                            , groups          = gs
+                            , attributeGroups = ags
+                            } = readSchema s
+              gen = genSchema schema "priceList"
           Q.sample gen
           return ()
 
@@ -60,9 +49,9 @@ main = do s <- readFile "out.xsd"
 -- Generators for XML schema types
 ------------------------------------------------------------------------
 
-mkSchemaGen :: Schema -> Name -> Q.Gen XmlDoc
-mkSchemaGen s rootElementName = 
-  do r <- mkElementGen rootElement s
+genSchema :: Schema -> Name -> Q.Gen XmlDoc
+genSchema s rootElementName = 
+  do r <- genElement rootElement s
      -- TODO Figure out how to do proper handling of namespaces
      -- TODO Enforce assumption that maxOccurs of rootElement is 1
      let r' = addAttribute (head r) ("xmlns:p", targetNameSpace s)
@@ -71,95 +60,140 @@ mkSchemaGen s rootElementName =
             , encoding = "ISO-8859-1"
             , root = r'
             }
-    where
-    rootElement = -- TODO Figure out how to do proper handling of namespaces
-      rename (M.fromJust $ findByName rootElementName $ elements s) ("p:" ++ rootElementName)
+  where
+    rootElement =
+      rename (case findByName rootElementName $ elements s of
+                Nothing -> error $ "Root element '" ++ rootElementName ++ "' not found in schema!"
+                Just e  -> e) 
+             ("p:" ++ rootElementName) -- TODO Figure out how to do proper handling of namespaces
 
-mkElementGen :: Element -> Schema -> Q.Gen [Node]
-mkElementGen e typingContext = case e of
+genElement :: Element -> Schema -> Q.Gen [Node]
+genElement e typingContext = case e of
   -- TODO Implement substitution groups
   ElementRef n _ _ _ -> return [TxtNode n [] ""] -- TODO
   ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     case prefix of
      -- Built in XML Schema base types
-      "xsd" -> case name of
-        "string"       -> sizedListOf mino maxo $ genTxtNodeString n
-        "decimal"      -> sizedListOf mino maxo $ genTxtNodeDecimal n
-        "integer"      -> sizedListOf mino maxo $ genTxtNodeInteger n
-        "base64Binary" -> sizedListOf mino maxo $ genTxtNodeBase64String n
-        other     -> error $ "Unsupported schema base type: " ++ (show t)
+      "xsd" -> sizedListOf mino maxo $ genTxtNode n [] $ genBaseType name
       -- Types defined in the schema
-      custom -> sizedListOf mino maxo $ lookupTypeAndMkGen t typingContext n
+      _     -> sizedListOf mino maxo $ lookupTypeGen t typingContext n
   ElementWithSimpleTypeDecl n mino maxo t ms -> 
     sizedListOf mino maxo $ genTxtNodeSimpleType t typingContext n
   ElementWithComplexTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ mkComplexTypeGen t typingContext n
+    sizedListOf mino maxo $ genComplexType t typingContext n
 
-lookupTypeAndMkGen :: QName -> Schema -> Name -> Q.Gen Node
-lookupTypeAndMkGen typeName typingContext elmName =
+genBaseType :: String -> Q.Gen String
+genBaseType typeName = 
+  case typeName of
+    "string"       -> genString
+    "decimal"      -> genDecimal
+    "integer"      -> showGen genInt
+    "base64Binary" -> genBase64String
+    other          -> error $ "Unsupported schema base type: " ++ typeName
+
+lookupSimpleTypeGen :: QName -> Schema -> Q.Gen String
+lookupSimpleTypeGen typeName typingContext =
+   case findByMaybeQName typeName (simpleTypes typingContext) of
+     Just simpleType -> genSimpleType simpleType typingContext
+     Nothing -> error $ "SimpleType " ++ show typeName ++ " not found in schema!"
+
+lookupTypeGen :: QName -> Schema -> Name -> Q.Gen Node
+lookupTypeGen typeName typingContext elmName =
   case findByMaybeQName typeName (simpleTypes typingContext) of
-    Just simpleType -> genTxtNodeSimpleType simpleType typingContext elmName          
+    Just simpleType -> genTxtNode elmName [] $ genSimpleType simpleType typingContext          
     Nothing ->
       case findByMaybeQName typeName (complexTypes typingContext) of
-        Just complexType -> mkComplexTypeGen complexType typingContext elmName
+        Just complexType -> genComplexType complexType typingContext elmName
         Nothing -> error $ "Type " ++ show typeName ++ " not found in schema!"
 
-mkComplexTypeGen :: ComplexType -> Schema -> Name -> Q.Gen Node
-mkComplexTypeGen t typingContext elmName = case t of
+lookupAttributeGen :: Ref -> Schema -> Q.Gen (Maybe Attr)
+lookupAttributeGen ref s = genAttribute (lookupAttribute ref s) s 
+
+genAttribute :: Attribute -> Schema -> Q.Gen (Maybe Attr)
+genAttribute a s = case a of
+  AttributeRef ref use -> genAttributeAux (lookupAttribute ref s) $ Just use
+  a                    -> genAttributeAux a                         Nothing
+  where
+    genAttributeAux aa useOvveride = case aa of
+      AttributeWithTypeRef aQName aType use ->
+        useToMaybe (lookupSimpleTypeGen aType s) (prefer useOvveride use) (\v -> Just (name aQName, v))
+      AttributeWithTypeDecl aQName simpleType use ->
+        useToMaybe (genSimpleType  simpleType s) (prefer useOvveride use) (\v -> Just (name aQName, v))
+    
+    prefer (Just a) _ = a 
+    prefer Nothing  b = b
+    
+    useToMaybe :: Q.Gen a -> Use -> (a -> Maybe b) -> Q.Gen (Maybe b)
+    useToMaybe gen use wrapper =
+      case use of
+        Required -> 
+          do v <- gen
+             return $ wrapper v
+        Optional -> 
+          do b <- Q.arbitrary
+             if b 
+             then do v <- gen
+                     return $ wrapper v
+             else return Nothing
+        Prohibited -> return Nothing
+
+genComplexType :: ComplexType -> Schema -> Name -> Q.Gen Node
+genComplexType t typingContext elmName = case t of
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
-    genElmNode elmName sisNodeGens
+    genElmNode elmName sisNodeGens attrGens
     where
       sisNodeGens :: [Q.Gen [Node]]
       sisNodeGens = map (\si -> case si of
-                                  SIElement e -> mkElementGen e typingContext
-                                  SIChoice  c -> mkChoiceGen  c typingContext)
+                                  SIElement e -> genElement e typingContext
+                                  SIChoice  c -> genChoice  c typingContext)
                         sequenceItems
+      attrGens    :: [Q.Gen (Maybe Attr)]
+      attrGens    = map (\a -> genAttribute a typingContext) as
 
-mkChoiceGen :: Choice -> Schema -> Q.Gen [Node]
-mkChoiceGen = error "Choice is not yet supported!"
+genChoice :: Choice -> Schema -> Q.Gen [Node]
+genChoice = error "Choice is not yet supported!" -- TODO Implement Choice
 
 ------------------------------------------------------------------------
 -- Generators for XML document types
 ------------------------------------------------------------------------
 
-genElmNode :: Name -> [Q.Gen [Node]] -> Q.Gen Node
-genElmNode n sisNodeGens = genElmNodeAux sisNodeGens []
+genElmNode :: Name -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Q.Gen Node
+genElmNode name childNodeGens attrGens = genElmNodeAux childNodeGens [] attrGens []
   where
-    genElmNodeAux gens nodes =
-      if null gens then
-        -- TODO Replace [] with generated attributes
-        return $ ElmNode n [] $ ElmList $ nodes 
+    genElmNodeAux :: [Q.Gen [Node]]       -> [Node] 
+                  -> [Q.Gen (Maybe Attr)] -> [Attr] 
+                  ->  Q.Gen Node
+    genElmNodeAux nGens nodes aGens attrs =
+      if null aGens then
+        if null nGens then
+          return $ ElmNode name attrs $ ElmList $ nodes 
+        else
+          do n <- head nGens
+             genElmNodeAux (tail nGens) (nodes ++ n) aGens attrs
       else       
-        do n <- head gens
-           genElmNodeAux (tail gens) (nodes ++ n)
+        do ma <- head aGens
+           genElmNodeAux nGens nodes (tail aGens) (case ma of 
+                                                     Just a  -> attrs ++ [a]
+                                                     Nothing -> attrs)
 
--- TODO Implement this more efficiently!
-genTxtNodeDecimal :: Name -> Q.Gen Node
-genTxtNodeDecimal n = genTxtNode n [] $ genMatch $ R.readRegEx "(\\+|-)?\\d*(\\.)?\\d+"
-
-genTxtNode :: (Show a) => Name -> [Attr] -> Q.Gen a -> Q.Gen Node
+genTxtNode :: Name -> [Attr] -> Q.Gen String -> Q.Gen Node
 genTxtNode n as gen = 
   do s <- gen
-     return $ TxtNode n [] $ show s
+     return $ TxtNode n [] $ xmlEncode s
 
-genTxtNodeString :: Name -> Q.Gen Node
-genTxtNodeString n = 
-  do s <- genString
-     return $ TxtNode n [] s
+-- TODO Implement this more efficiently!
+genDecimal :: Q.Gen String
+genDecimal = genMatch $ R.readRegEx "(\\+|-)?\\d*(\\.)?\\d+"
 
 -- TODO Replace this wasteful impl by one that directly generates a valid Base64 string
-genTxtNodeBase64String :: Name -> Q.Gen Node
-genTxtNodeBase64String n = 
+genBase64String :: Q.Gen String
+genBase64String = 
   do s <- genString
-     return $ TxtNode n [] $ B64.encode s
+     return $ B64.encode s
 
-genTxtNodeInteger :: Name -> Q.Gen Node
-genTxtNodeInteger n = genTxtNode n [] genInt
-
-genInt :: Q.Gen Int
-genInt =
-  do (i::Int) <- Q.arbitrary
-     return i 
+genInt :: Q.Gen String
+genInt = do (i::Int) <- Q.arbitrary
+            return $ show i
 
 genTxtNodeSimpleType :: SimpleType -> Schema -> Name -> Q.Gen Node 
 genTxtNodeSimpleType t typingContext n =
@@ -180,13 +214,13 @@ genSimpleType t typingContext   =
         Enumeration vs -> Q.oneof $ map return vs
         Pattern      r -> genMatch r
         MaxExclusive i -> error "MaxExclusive generation not implemented"
-    -- (SimpleTypeList        (Maybe QName) ItemType) ->
+    -- (SimpleTypeList  (Maybe QName) ItemType) ->
     -- (SimpleTypeUnion       (Maybe QName) [SimpleType]) ->
 
 genMatch :: R.RegEx -> Q.Gen String
 genMatch r = case r of
   R.Literal c -> case c of
-    '.' -> Q.elements stringCharacters >>= \c -> return [c] 
+    '.' -> Q.elements stringCharacters >>= \c -> return $ xmlEncode [c] 
     c   -> return [c]
   R.SCEscape c -> return [c]
   R.TCEscape c -> 
@@ -197,8 +231,8 @@ genMatch r = case r of
       --'I'
       --'c'
       --'C'
-      'd' -> Q.elements digitCharacters >>= \c -> return [c]
-      'D' -> Q.elements nonDigitCharacters >>= \c -> return [c]
+      'd' -> Q.elements    digitCharacters >>= \c -> return [c]
+      'D' -> Q.elements nonDigitCharacters >>= \c -> return $ xmlEncode [c]
       --'w'
       --'W'
   R.Sequence rs -> 
@@ -215,8 +249,9 @@ genMatch r = case r of
   
 -- TODO Add map of string chars to generate with as optional CLI parameter
 genString :: Q.Gen String
-genString = do s <- Q.listOf $ Q.elements stringCharacters
-               return $ xmlEncode s
+genString = 
+  do s <- Q.listOf $ Q.elements stringCharacters
+     return $ xmlEncode s
 
 xmlEncode :: String -> String
 xmlEncode [] = []
@@ -249,6 +284,11 @@ sizedListOf min max g =
   in do i <- init
         r <- rest
         return $ i ++ r
+
+showGen :: (Show a) => Q.Gen a -> Q.Gen String
+showGen gen = 
+  do s <- gen
+     return $ show s
 
 ------------------------------------------------------------------------
 -- Utility generators

@@ -18,7 +18,6 @@ import System
   , getArgs
   , system
   )
-import System.Process (readProcessWithExitCode)
 import System.Random
   ( Random
   , StdGen
@@ -26,24 +25,28 @@ import System.Random
   , split
   , newStdGen
   )
+import System.Process (readProcessWithExitCode)
 
 type ProcessInput  = (FilePath, [String], String)
 type ProcessOutput = (ExitCode,  String , String)
 
 -- TODO Extract these as command line parameters
-inSchemaPath  = "in2.xsd"
-outSchemaPath = "out2.xsd"
-xslPath       = "transform2.xsl"
+inSchemaPath  = "in.xsd"
+outSchemaPath = "out.xsd"
+xslPath       = "transform.xsl"    
 numberOfRuns  = 10
 
 mainG = do args <- getArgs
            s <- readFile inSchemaPath
            let schema = readSchema s
-               gen = mkSchemaGen schema "priceList"
+               gen = genSchema schema "priceList"
+           putStrLn $ show schema
            randomXmlDocs <- generateTestData 1 gen
+           mapM_ (putStrLn . show) randomXmlDocs
            transformedDocs <- transformXmls randomXmlDocs xslPath
+           mapM_ (putStrLn . show) transformedDocs
            let docsToValidate = map (readTree . exitCode) transformedDocs
-           mapM_ (putStrLn . show) docsToValidate
+           -- mapM_ (putStrLn . show) docsToValidate
            return ()
            where
              exitCode (_,e,_) = e
@@ -51,9 +54,11 @@ mainG = do args <- getArgs
 main = do args <- getArgs
           s <- readFile inSchemaPath
           let schema = readSchema s
-              gen = mkSchemaGen schema "priceList"
+              gen = genSchema schema "priceList"
           randomXmlDocs <- generateTestData numberOfRuns gen
+          mapM_ (putStrLn . show) randomXmlDocs
           transformedDocs <- transformXmls randomXmlDocs xslPath
+          mapM_ (putStrLn . show) randomXmlDocs
           let docsToValidate = map (readTree . exitCode) transformedDocs
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
@@ -119,4 +124,7 @@ generateTestData howMany g =
      let m = G.unGen g
      let rnds rnd = rnd1 : rnds rnd2 where (rnd1,rnd2) = System.Random.split rnd
      return [(m r n) | (r,n) <- rnds rnd0 `zip` [0,2..(2 * howMany - 1)] ]
+
+
+
 

@@ -76,7 +76,7 @@ instance Show XmlDoc where
 	show XmlDoc { version = v, encoding = e, root = r } =
 		"<?xml version='" ++ v ++ "' encoding='" ++ e ++ "' ?>" ++ show r 
 	
-wrap n as c = (begTag (n ++ showAttrList as)) ++ c ++ (endTag n)
+wrap n as c = (begTag $ n ++ showAttrList as) ++ c ++ (endTag n)
 begTag n = "<"  ++ n ++ ">"
 endTag n = "</" ++ n ++ ">"
 

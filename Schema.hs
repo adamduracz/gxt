@@ -12,6 +12,7 @@ import qualified RegEx as R
 
 data Schema = Schema { targetNameSpace :: Name
                      , elements        :: [Element]
+                     , attributes      :: [Attribute]
                      , simpleTypes     :: [SimpleType] 
                      , complexTypes    :: [ComplexType]
                      , groups          :: [Group]
@@ -67,10 +68,10 @@ data SequenceItem = SIElement Element
                   deriving (Eq,Show)
 data SimpleContent = SimpleContent deriving (Eq,Show)
 data ComplexContent = ComplexContent deriving (Eq,Show)
-
-data Attribute = AttributeRef Ref
-               | AttributeWithTypeRef Name Type Use 
-               | AttributeWithTypeDecl Name SimpleType Use
+ 
+data Attribute = AttributeRef          Ref              Use
+               | AttributeWithTypeRef  QName Type       Use 
+               | AttributeWithTypeDecl QName SimpleType Use
                deriving (Eq,Show)
 
 type Ref = QName
@@ -85,20 +86,28 @@ data AttributeGroup = AttributeGroup Name [Attribute] deriving (Eq,Show)
 -- Classes and instances
 ------------------------------------------------------------------------
 
+class QNamed a where
+  qname :: a -> QName
+
+instance QNamed Attribute where
+  qname (AttributeRef          qn _ )  = qn
+  qname (AttributeWithTypeRef  qn _ _) = qn
+  qname (AttributeWithTypeDecl qn _ _) = qn
+
 class MaybeQNamed a where
-  qname :: a -> Maybe QName
+  mqname :: a -> Maybe QName
 
 instance MaybeQNamed ComplexType where
-  qname (ComplexTypeAll            mqn _ _) = mqn
-  qname (ComplexTypeChoice         mqn _ _) = mqn
-  qname (ComplexTypeSequence       mqn _ _) = mqn
-  qname (ComplexTypeSimpleContent  mqn _ _) = mqn
-  qname (ComplexTypeComplexContent mqn _ _) = mqn
+  mqname (ComplexTypeAll            mqn _ _) = mqn
+  mqname (ComplexTypeChoice         mqn _ _) = mqn
+  mqname (ComplexTypeSequence       mqn _ _) = mqn
+  mqname (ComplexTypeSimpleContent  mqn _ _) = mqn
+  mqname (ComplexTypeComplexContent mqn _ _) = mqn
 
 instance MaybeQNamed SimpleType where
-  qname (SimpleTypeRestriction mqn _ _) = mqn
-  qname (SimpleTypeList        mqn _)   = mqn
-  qname (SimpleTypeUnion       mqn _)   = mqn
+  mqname (SimpleTypeRestriction mqn _ _) = mqn
+  mqname (SimpleTypeList        mqn _)   = mqn
+  mqname (SimpleTypeUnion       mqn _)   = mqn
 
 instance Show QName where
   show (QName nsp n) | nsp == "" = n
@@ -109,6 +118,11 @@ instance Named Element where
   name (ElementWithTypeRef         n _ _ _ _) = n
   name (ElementWithSimpleTypeDecl  n _ _ _ _) = n
   name (ElementWithComplexTypeDecl n _ _ _ _) = n
+
+instance Named Attribute where
+  name (AttributeRef          (QName _ n) _ )  = n
+  name (AttributeWithTypeRef  (QName _ n) _ _) = n
+  name (AttributeWithTypeDecl (QName _ n) _ _) = n
 
 instance Named QName where
   name (QName _ n) = n
@@ -135,14 +149,16 @@ xmlDocToSchema
   , root     = ElmNode n as (ElmList elms)
   } = 
   Schema 
-  { targetNameSpace =  lookupE "targetNamespace" as
-  , elements        = [ nodeToElement        t n | n <- elms, name n == "xsd:element" ]
-  , simpleTypes     = [ nodeToSimpleType     t n | n <- elms, name n == "xsd:simpleType" ]
-  , complexTypes    = [ nodeToComplexType    t n | n <- elms, name n == "xsd:complexType" ]
-  , groups          = [ nodeToGroup          t n | n <- elms, name n == "xsd:group" ]
-  , attributeGroups = [ nodeToAttributeGroup t n | n <- elms, name n == "xsd:attributeGroup" ]
+  { targetNameSpace = lookupE "targetNamespace" as
+  , elements        = convert "xsd:element"        nodeToElement
+  , attributes      = convert "xsd:attribute"      nodeToAttribute
+  , simpleTypes     = convert "xsd:simpleType"     nodeToSimpleType
+  , complexTypes    = convert "xsd:complexType"    nodeToComplexType
+  , groups          = convert "xsd:group"          nodeToGroup
+  , attributeGroups = convert "xsd:attributeGroup" nodeToAttributeGroup
   }
   where
+    convert schemaComponentName converter = [ converter t n | n <- elms, name n == schemaComponentName ]
     t = getTargetNamespacePrefix x
 
 getTargetNamespacePrefix :: XmlDoc -> Name
@@ -186,24 +202,31 @@ nodeToElement tns node@(EmpNode n as) =
 nodeToAttribute :: Namespace -> Node -> Attribute
 nodeToAttribute tns node@(ElmNode n as (ElmList els)) = 
   case name (head els) of
-  "xsd:simpleType" -> AttributeWithTypeDecl n
-    (nodeToSimpleType tns (head els))
-    (getUse node)
-  v -> error $ show $head els
+    "xsd:simpleType" -> 
+      AttributeWithTypeDecl
+        (QName tns $ lookupE "name" as)
+        (nodeToSimpleType tns (head els))
+        (getUse node)
+    v -> error $ show $ head els
 nodeToAttribute tns (TxtNode n as s) = undefined
 nodeToAttribute tns node@(EmpNode n as) = 
   case getAttrValue "ref" node of
-    ""  -> AttributeWithTypeRef (lookupE "name" as) 
-                                (stringToQName $ lookupE "type" as)
-                                (getUse node) -- TODO Verify that this is indeed default 
-    ref -> AttributeRef $ stringToQName ref
+    "" -> 
+      AttributeWithTypeRef 
+        (QName tns $ lookupE "name" as)
+        (stringToQName $ lookupE "type" as)
+        (getUse node)
+    ref ->
+      AttributeRef
+        (stringToQName ref)
+        (getUse node)
 
 getUse :: Node -> Use
 getUse node = case getAttrValue "use" node of
                 "required" -> Required
                 "optional" -> Optional
                 "prohibited" -> Prohibited
-                _ -> Optional
+                _ -> Optional -- TODO Verify that this is indeed default 
 
 -- SimpleType
 nodeToSimpleType :: Namespace -> Node -> SimpleType
@@ -225,29 +248,36 @@ nodeToSimpleType tns node@(ElmNode n as (ElmList els)) =
              MaxExclusive $ read $ getAttrValue "value" $ head $ elems rnode
     e -> error $ "Failed to convert node  to SimpleType: " ++ e
 
+-- TODO Rewrite to support other ns prefixes for the xsd namespace
 -- | ComplexType
 -- | The Name parameter is the target namespace of the schema, to which the type will be added
 nodeToComplexType :: Namespace -> Node -> ComplexType
-nodeToComplexType tns node@(ElmNode n as (ElmList els)) =
-  let atts    = [ nodeToAttribute tns an | an <- elems node, name an == "xsd:attribute" ];
-      elmName = maybeStringToMaybeQName tns $ lookup "name" as in
-  case name (head els) of
-  "xsd:all" -> ComplexTypeAll elmName 
-    (All $ map (makeSequenceItem tns) $ elems $ getChild "xsd:all" node)
-    atts
-  "xsd:choice" -> ComplexTypeChoice elmName
-    (nodeToChoice $ head els)
-    atts
-  "xsd:sequence" -> ComplexTypeSequence elmName
-    (Sequence $ map (makeSequenceItem tns) $ elems $ getChild "xsd:sequence" node)
-    atts
-  "xsd:simpleContent" -> ComplexTypeSimpleContent elmName
-    (SimpleContent)
-    atts
-  "xsd:complexContent" -> ComplexTypeComplexContent elmName
-    (ComplexContent)
-    atts
-  v -> error $ show $ head els
+nodeToComplexType tns node@(ElmNode n as (ElmList children)) =
+  if null children
+  then error $ "Expected non-empty indicator node in complexType: " ++ n
+  else let indicator = head [ e | e <- children, isIndicator e ]
+           nodeAttributes = [ nodeToAttribute tns an | an <- children, name an == "xsd:attribute" ]
+           elmName = maybeStringToMaybeQName tns $ lookup "name" as in
+       case name indicator of
+         "xsd:all" -> ComplexTypeAll elmName 
+           (All $ map (makeSequenceItem tns) $ elems indicator)
+            nodeAttributes
+         "xsd:choice" -> ComplexTypeChoice elmName
+           (nodeToChoice indicator)
+           nodeAttributes
+         "xsd:sequence" -> ComplexTypeSequence elmName
+           (Sequence $ map (makeSequenceItem tns) $ elems indicator)
+           nodeAttributes
+         "xsd:simpleContent" -> ComplexTypeSimpleContent elmName
+           (SimpleContent)
+           nodeAttributes
+         "xsd:complexContent" -> ComplexTypeComplexContent elmName
+           (ComplexContent)
+           nodeAttributes
+         v -> error $ show $ indicator
+  where
+    isIndicator = 
+       (`elem` ["xsd:all", "xsd:choice", "xsd:sequence", "xsd:simpleContent", "xsd:complexContent"]) . name
 
 -- The Name parameter is the target namespace prefix, used if not already present in s
 -- Todo find out why "fmap stringToQName" doesn't work! 
@@ -314,13 +344,24 @@ findByName _ []                   = Nothing
 findByName n (e:es) | name e == n = Just e
                     | otherwise   = findByName n es
 
+findByQName :: QNamed a => QName -> [a] -> Maybe a
+findByQName _ [] = Nothing
+findByQName n (e:es) | qname e == n = Just e
+                     | otherwise    = findByQName n es
+
+lookupAttribute :: Ref -> Schema -> Attribute
+lookupAttribute ref typingContext =
+  case findByQName ref (attributes typingContext) of
+    Just a  -> a
+    Nothing -> error $ "Attribute " ++ show ref ++ " not found in schema!"
+
 findByMaybeQName :: MaybeQNamed a => QName -> [a] -> Maybe a
 findByMaybeQName _ [] = Nothing
-findByMaybeQName n (e:es) | M.fromJust (qname e) == n = Just e
-                          | otherwise                 = findByMaybeQName n es
+findByMaybeQName n (e:es) | mqname e == Just n = Just e 
+                          | otherwise          = findByMaybeQName n es
 
 stringToQName :: String -> QName
-stringToQName "" = QName ""     ""
+stringToQName "" = QName "" ""
 stringToQName s = case length cs of
   1 -> QName "" (head cs)
   2 -> QName (head cs) (head $ tail cs)
@@ -332,13 +373,17 @@ readSchema = xmlDocToSchema . readTree
 
 ---- Generic utilities
 
-lookupE :: Eq a => a -> [(a,b)] -> b
-lookupE a l = M.fromJust $ lookup a l
+lookupE :: (Show a, Show b, Eq a) => a -> [(a,b)] -> b
+lookupE a l = 
+  case lookup a l of
+    Just v -> v
+    Nothing -> error $ "lookupE of " ++ show a ++ " in " ++ show l ++ " failed."
 
 lookupD :: Eq a => a -> [(a,b)] -> b -> b
-lookupD a l d = case lookup a l of
-  Just b  -> b
-  Nothing -> d
+lookupD a l d = 
+  case lookup a l of
+    Just b  -> b
+    Nothing -> d
 
 split :: String -> Char -> [String]
 split [] delim = [""]
