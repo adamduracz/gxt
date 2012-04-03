@@ -151,19 +151,26 @@ genAttribute a s = case a of
 genComplexType :: ComplexType -> Schema -> QName -> Q.Gen Node
 genComplexType t typingContext elmName = case t of
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
-    genElmNode elmName sisNodeGens attrGens typingContext
+    genElmNode elmName nodeGens attrGens typingContext
     where
-      sisNodeGens :: [Q.Gen [Node]]
-      sisNodeGens = map (\si -> case si of
-                                  SIElement e -> genElement e typingContext
-                                  SIChoice  c -> genChoice  c typingContext)
-                        sequenceItems
-      attrGens    :: [Q.Gen (Maybe Attr)]
-      attrGens    = map (\a -> genAttribute a typingContext) as
+      nodeGens :: [Q.Gen [Node]]
+      nodeGens = map (\i -> genItem i typingContext) sequenceItems
+      attrGens :: [Q.Gen (Maybe Attr)]
+      attrGens = map (\a -> genAttribute a typingContext) as
+
+genItem :: Item -> Schema -> Q.Gen [Node]
+genItem i s =
+  case i of
+    IElement  e -> genElement e s
+    IGroup    g -> error "Unimplemented function: genGroup"
+    IChoice   c -> genChoice  c s
+    ISequence s -> error "Unimplemented function: genSequence"
+    IAny      a -> error "Unimplemented function: genAny"
 
 genChoice :: Choice -> Schema -> Q.Gen [Node]
-genChoice = error "Choice is not yet supported!" -- TODO Implement Choice
-
+genChoice (Choice els) s =
+  do c <- Q.oneof $ map (\i -> genItem i s) els 
+     return c
 ------------------------------------------------------------------------
 -- Generators for XML document types
 ------------------------------------------------------------------------

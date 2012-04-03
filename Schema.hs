@@ -29,6 +29,7 @@ data Occurs = Occurs Int | Unbounded deriving (Eq,Show)
 type MinOccurs = Occurs
 type MaxOccurs = Occurs
 
+-- http://www.w3.org/TR/xmlschema-1/#declare-element
 data Element 
   = ElementRef                 Ref   MinOccurs MaxOccurs             (Maybe SubstitutionGroup)
   | ElementWithTypeRef         QName MinOccurs MaxOccurs Type        (Maybe SubstitutionGroup)
@@ -60,13 +61,21 @@ data ComplexType
   | ComplexTypeComplexContent (Maybe QName) ComplexContent [Attribute]
   deriving (Eq,Show)
 
-data All = All [SequenceItem] deriving (Eq,Show)
-data Choice = Choice MinOccurs MaxOccurs [Element] deriving (Eq,Show)
-data Sequence = Sequence [SequenceItem] deriving (Eq,Show)
-data SequenceItem = SIElement Element
-                  | SIChoice Choice
-                  deriving (Eq,Show)
+data Any      = Any      Namespace MinOccurs MaxOccurs deriving (Eq,Show)
+data All      = All      [Element]                     deriving (Eq,Show)
+data Choice   = Choice   [Item]                        deriving (Eq,Show)
+data Sequence = Sequence [Item]                        deriving (Eq,Show)
+
+-- TODO Add support for groups http://www.w3.org/TR/2004/REC-xmlschema-1-20041028/structures.html#element-all
+data Item = IElement  Element
+          | IGroup    Group
+          | IChoice   Choice
+          | ISequence Sequence
+          | IAny      Any
+          deriving (Eq,Show)
+
 data SimpleContent = SimpleContent deriving (Eq,Show)
+
 data ComplexContent = ComplexContent deriving (Eq,Show)
  
 data Attribute = AttributeRef          Ref              Use
@@ -265,19 +274,19 @@ nodeToComplexType tns node@(ElmNode n as (ElmList children)) =
            elmName = maybeStringToMaybeQName tns $ lookup "name" as in
        case name indicator of
          "xsd:all" -> ComplexTypeAll elmName 
-           (All $ map (makeSequenceItem tns) $ elems indicator)
+           (All $ map (nodeToElement tns) $ elems indicator)
             nodeAttributes
          "xsd:choice" -> ComplexTypeChoice elmName
-           (nodeToChoice indicator)
+           (nodeToChoice tns indicator)
            nodeAttributes
          "xsd:sequence" -> ComplexTypeSequence elmName
-           (Sequence $ map (makeSequenceItem tns) $ elems indicator)
+           (nodeToSequence tns indicator)
            nodeAttributes
          "xsd:simpleContent" -> ComplexTypeSimpleContent elmName
-           (SimpleContent)
+           (SimpleContent) -- TODO
            nodeAttributes
          "xsd:complexContent" -> ComplexTypeComplexContent elmName
-           (ComplexContent)
+           (ComplexContent) -- TODO
            nodeAttributes
          v -> error $ show $ indicator
   where
@@ -293,28 +302,39 @@ maybeStringToMaybeQName tns (Just s) =
            qn              -> qn
 maybeStringToMaybeQName _ Nothing  = Nothing
 
-makeSequenceItem :: Namespace -> Node -> SequenceItem
-makeSequenceItem tns node@(ElmNode _ _ (ElmList els)) = 
+makeItem :: Namespace -> Node -> Item
+makeItem tns node@(ElmNode _ _ (ElmList els)) = 
   case name node of
-    "xsd:element" -> SIElement $ nodeToElement tns node
-    "xsd:choice"  -> SIChoice  $ nodeToChoice node
-    s -> error $ show s
-makeSequenceItem tns node@(EmpNode _ _) = SIElement $ nodeToElement tns node
+    "xsd:element"  -> IElement  $ nodeToElement  tns node
+    "xsd:group"    -> IGroup    $ nodeToGroup    tns node
+    "xsd:choice"   -> IChoice   $ nodeToChoice   tns node
+    "xsd:sequence" -> ISequence $ nodeToSequence tns node
+    "xsd:any"      -> IAny      $ nodeToAny          node
 
-nodeToChoice :: Node -> Choice
-nodeToChoice node@(ElmNode _ as (ElmList els)) = 
-  Choice (minOccurs as)
-         (maxOccurs as)
-         [] -- TODO Finish this and add remaining cases
+    s -> error $ "Unsupported item: " ++ show s
+makeItem tns node@(EmpNode _ _) = IElement $ nodeToElement tns node
 
--- Group
-nodeToGroup :: Namespace -> Node -> Group
+nodeToChoice :: Namespace -> Node -> Choice
+nodeToChoice tns node@(ElmNode _ as (ElmList els)) = Choice $ map (makeItem tns) els 
+
+nodeToGroup :: Namespace -> Node -> Group --TODO Review this
 nodeToGroup tns node@(ElmNode n as (ElmList els)) =
   let elmName = lookupE "name" $ as in
   case name (head els) of
     "xsd:sequence" -> Group elmName
-      (Sequence $ map (makeSequenceItem tns) $ elems $ getChild "xsd:sequence" node)
+      (Sequence $ map (makeItem tns) $ elems $ getChild "xsd:sequence" node)
     v -> error $ show $ head els
+
+nodeToSequence :: Namespace -> Node -> Sequence
+nodeToSequence tns node = Sequence $ map (makeItem tns) $ elems node
+
+nodeToAny :: Node -> Any
+nodeToAny (EmpNode _ as) = Any namespace (minOccurs as) (maxOccurs as)
+  where
+    namespace = case lookup "namespace" as of
+                  Just ns -> ns
+                  Nothing -> "##any"
+
 
 -- AttributeGroup
 nodeToAttributeGroup :: Namespace -> Node -> AttributeGroup
