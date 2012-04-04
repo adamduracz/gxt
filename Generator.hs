@@ -213,6 +213,30 @@ genSimpleType t typingContext   =
     -- (SimpleTypeList  (Maybe QName) ItemType) ->
     -- (SimpleTypeUnion       (Maybe QName) [SimpleType]) ->
 
+-- TODO Add map of string chars to generate with as optional CLI parameter
+genString :: Q.Gen String
+genString = 
+  do s <- Q.listOf $ Q.elements stringCharacters
+     return $ xmlEncode s
+
+xmlEncode :: String -> String
+xmlEncode [] = []
+xmlEncode (c:cs) = 
+  case l of
+    Nothing -> c :  xmlEncode cs
+    Just e  -> e ++ xmlEncode cs
+    where
+      l = lookup c [ ('\"',"&quot;")
+                   , ('\'',"&apos;")
+                   , ('<' ,"&lt;")
+                   , ('>' ,"&gt;")
+                   , ('&' ,"&amp;")
+                   ]
+
+------------------------------------------------------------------------
+-- Generator of strings matching a regular expression
+------------------------------------------------------------------------
+
 genMatch :: R.RegEx -> Q.Gen String
 genMatch r = case r of
   R.Literal c -> case c of
@@ -242,26 +266,6 @@ genMatch r = case r of
     do init <- Q.vectorOf min $ genMatch rr
        rest <- Q.listOf       $ genMatch rr
        return $ concat init ++ concat rest
-
--- TODO Add map of string chars to generate with as optional CLI parameter
-genString :: Q.Gen String
-genString = 
-  do s <- Q.listOf $ Q.elements stringCharacters
-     return $ xmlEncode s
-
-xmlEncode :: String -> String
-xmlEncode [] = []
-xmlEncode (c:cs) = 
-  case l of
-    Nothing -> c :  xmlEncode cs
-    Just e  -> e ++ xmlEncode cs
-    where
-      l = lookup c [ ('\"',"&quot;")
-                   , ('\'',"&apos;")
-                   , ('<' ,"&lt;")
-                   , ('>' ,"&gt;")
-                   , ('&' ,"&amp;")
-                   ]
 
 ------------------------------------------------------------------------
 -- Generator combinators
