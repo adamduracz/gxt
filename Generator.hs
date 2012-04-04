@@ -9,6 +9,7 @@
 -- - Implement generation of remaining two-character escapes
 -- - Handing of schema hierarchies
 --   - Proper handling of namespaces
+-- - Generators for CharClassEsc (CCEscCat/CCEscCompl) / CharProp / CharCategory / BlockName
 ------------------------------------------------------------------------
 
 module Generator where
@@ -157,7 +158,7 @@ genChoice (Choice items) s =
      return c
 
 genSequence :: Sequence -> Schema -> Q.Gen [Node]
-genSequence (Sequence items) s = concatGen $ map (\i -> genItem i s) items
+genSequence (Sequence items) s = concatGens $ map (\i -> genItem i s) items
 
 ------------------------------------------------------------------------
 -- Generators for XML document types
@@ -169,7 +170,7 @@ genElmNode name childNodeGens attributeGens s =
                       (\ma as -> case ma of
                                    Just a  -> as ++ [a]
                                    Nothing -> as)
-     nodes <- concatGen childNodeGens
+     nodes <- concatGens childNodeGens
      return $ ElmNode (reduceQName name s) attrs $ ElmList $ nodes
 
 genTxtNode :: Name -> [Attr] -> Q.Gen String -> Q.Gen Node
@@ -238,7 +239,95 @@ xmlEncode (c:cs) =
 ------------------------------------------------------------------------
 
 genMatch :: R.RegEx -> Q.Gen String
-genMatch r = case r of
+genMatch (R.Choice bs) = Q.oneof $ map genBranch bs
+
+genBranch :: R.Branch -> Q.Gen String
+genBranch (R.Branch ps) = concatGens $ map genPiece ps --TODO Also wrap with concatGen?
+
+genPiece :: R.Piece -> Q.Gen String
+genPiece (R.Piece a  Nothing) = genAtom a 
+genPiece (R.Piece a (Just qi)) =
+  case qi of
+    R.QQuestionMark       -> concatGen $ sizedListOf (Occurs 0)   (Occurs 1)   $ genAtom a
+    R.QStar               -> concatGen $ Q.listOf                              $ genAtom a
+    R.QPlus               -> concatGen $ Q.listOf1                             $ genAtom a
+    R.QQuantRange min max -> concatGen $ sizedListOf (Occurs min) (Occurs max) $ genAtom a
+    R.QQuantMin   min     -> concatGen $ sizedListOf (Occurs min) Unbounded    $ genAtom a
+    R.QQuantExact size    -> concatGen $ Q.vectorOf  size                      $ genAtom a
+
+genAtom :: R.Atom -> Q.Gen String
+genAtom a = 
+  case a of
+    R.AChar      c  -> return [c]
+    R.ACharClass cc -> genCharClass cc
+    R.ABrackets  re -> genMatch re
+
+genCharClass :: R.CharClass -> Q.Gen String
+genCharClass cc =
+  case cc of
+    R.CClassEsc  ccesc  -> genCharClassEsc  ccesc
+    R.CClassExpr ccexpr -> genCharClassExpr ccexpr
+    -- TODO Add support for the dot-all flas <<s>> (see Kay book Atoms section)
+    R.CClassDot         -> Q.elements stringCharacters >>= \c -> return [c]
+    -- TODO Add support for the multiline flag <<m>> (see Kay book Atoms section)
+    R.CClassHat         -> error "TODO Add support for beginning-matching using ^"
+    R.CClassDollar      -> error "TODO Add support for end-matching using $"
+
+genCharClassEsc :: R.CharClassEsc -> Q.Gen String
+genCharClassEsc ccesc =
+  case ccesc of
+    R.CCEscSingleChar sce -> genSingleCharEsc sce >>= \c -> return [c]
+    R.CCEscMultiChar  c   -> return [c]
+    R.CCEscCat        cp  -> error "Generator for character categories not implemented."
+    R.CCEscCompl      cp  -> error "Generator for character category compl. not implemented."
+
+genCharClassExpr :: R.CharClassExpr -> Q.Gen String
+genCharClassExpr (R.CharClassExpr cg) = genCharGroup cg
+
+genCharGroup :: R.CharGroup -> Q.Gen String
+genCharGroup cg =
+  case cg of
+    R.CGroupPos          pcg -> genPosCharGroup pcg
+    R.CGroupNeg          ncg -> genNegCharGroup ncg
+    R.CGroupCharClassSub ccs -> genCharClassSub ccs
+
+genPosCharGroup :: R.PosCharGroup -> Q.Gen String
+genPosCharGroup (R.PosCharGroup pcgis) = Q.oneof $ map genPosCharGroupItem pcgis
+
+genPosCharGroupItem :: R.PosCharGroupItem -> Q.Gen String
+genPosCharGroupItem i =
+  case i of
+    R.PosCharGroupRange        r   -> genCharRange    r
+    R.PosCharGroupCharClassEsc cce -> genCharClassEsc cce
+
+genCharRange :: R.CharRange -> Q.Gen String
+genCharRange cr =
+  case cr of
+    R.CodePointRange lo hi -> do l <- genCharOrEsc lo
+                                 h <- genCharOrEsc hi
+                                 c <- Q.elements [l..h] --TODO Test this, esp. on unicode
+                                 return [c] 
+    R.XmlCharIncDash c     -> return [c] 
+
+genCharOrEsc :: R.CharOrEsc -> Q.Gen Char
+genCharOrEsc coe =
+  case coe of
+    R.CharOrEscXmlChar       c   -> return c
+    R.CharOrEscSingleCharEsc sce -> genSingleCharEsc sce
+
+genNegCharGroup :: R.NegCharGroup -> Q.Gen String
+genNegCharGroup (R.NegCharGroup pcg) = error "TODO Implement genNegCharGroup."
+
+genCharClassSub :: R.CharClassSub -> Q.Gen String
+genCharClassSub ccs = error "TODO Implement genCharClassSub."
+
+genSingleCharEsc :: R.SingleCharEsc -> Q.Gen Char
+genSingleCharEsc (R.SingleCharEsc c) = return c
+
+
+
+
+{-
   R.Literal c -> case c of
     '.' -> Q.elements stringCharacters >>= \c -> return $ xmlEncode [c] 
     c   -> return [c]
@@ -266,6 +355,7 @@ genMatch r = case r of
     do init <- Q.vectorOf min $ genMatch rr
        rest <- Q.listOf       $ genMatch rr
        return $ concat init ++ concat rest
+-}
 
 ------------------------------------------------------------------------
 -- Generator combinators
@@ -290,8 +380,12 @@ showGen gen =
   do s <- gen
      return $ show s
 
-concatGen :: [Q.Gen [a]] -> Q.Gen [a]
-concatGen gs = foldGen gs (\v vs -> vs ++ v)
+concatGens :: [Q.Gen [a]] -> Q.Gen [a]
+concatGens gs = foldGen gs (\v vs -> vs ++ v)
+
+concatGen :: Q.Gen [[a]] -> Q.Gen [a]
+concatGen gen = do vs <- gen
+                   return $ concat vs
 
 foldGen :: [Q.Gen b] -> (b -> [a] -> [a]) -> Q.Gen [a]
 foldGen gs f = aux gs []
@@ -304,6 +398,10 @@ foldGen gs f = aux gs []
 
 singletonOf :: [a] -> Q.Gen [a]
 singletonOf list = Q.elements list >>= \c -> return [c]
+
+-- coinFlip :: Q.Gen a -> a -> Q.Gen a
+-- coinFlip gen dflt = Q.oneof [True,False] >>= \c -> if c then return c else gen
+     
 
 ------------------------------------------------------------------------
 -- Utility generators

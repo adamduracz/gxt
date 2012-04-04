@@ -27,8 +27,7 @@ data RegEx            = Choice [Branch]                   deriving (Eq,Show)
 data Branch           = Branch [Piece]                    deriving (Eq,Show)
 data Piece            = Piece Atom (Maybe QuantIndicator) deriving (Eq,Show) 
 
--- Quantifiers                  
-
+-- Quantifiers
 data QuantIndicator   = QQuestionMark
                       | QStar
                       | QPlus
@@ -160,15 +159,16 @@ charClassExpr = between (char '[') (char ']') charGroup >>= \cg -> return $ Char
 
 -- Character Groups
 charGroup :: Parser CharGroup
-charGroup =   try (posCharGroup >>= \g -> return $ CGroupPos          g)
-          <|> try (negCharGroup >>= \g -> return $ CGroupNeg          g)
+charGroup =   try (negCharGroup >>= \g -> return $ CGroupNeg          g)
+          <|> try (posCharGroup >>= \g -> return $ CGroupPos          g)
           <|>     (charClassSub >>= \g -> return $ CGroupCharClassSub g)
 
 -- TODO Specifically test this contraption!! Might not to work...
 posCharGroup :: Parser PosCharGroup
-posCharGroup = do gis <- many1 (try (charRange    >>= \cr -> return $ PosCharGroupRange        cr)
-                                <|> (charClassEsc >>= \cr -> return $ PosCharGroupCharClassEsc cr)) 
-                  return $ PosCharGroup gis
+posCharGroup = 
+  do gis <- many1 (try (charRange    >>= \cr -> return $ PosCharGroupRange        cr)
+                   <|> (charClassEsc >>= \cr -> return $ PosCharGroupCharClassEsc cr)) 
+     return $ PosCharGroup gis
 
 negCharGroup :: Parser NegCharGroup 
 negCharGroup = char '^' >> posCharGroup >>= \pcg -> return $ NegCharGroup pcg
@@ -186,6 +186,7 @@ charClassSub = try (do pcg <- posCharGroup
 -- Character Ranges
 charRange :: Parser CharRange
 charRange = try (do min <- charOrEsc
+                    char '-'
                     max <- charOrEsc
                     return $ CodePointRange min max)
             <|> (xmlCharIncDash >>= \c   -> return $ XmlCharIncDash c)
@@ -202,16 +203,17 @@ xmlCharIncDash = noneOf "[]\\"
 
 -- Character Class Escapes
 charClassEsc :: Parser CharClassEsc
-charClassEsc =   try (singleCharEsc                          >>= \c   -> return $ CCEscSingleChar c)
-             <|> try (char '\\' >> oneOf twoCharacterEscapes >>= \mce -> return $ CCEscMultiChar  mce)
-             <|> try (do string "\\p{"
-                         p <- charProp
-                         char '}'
-                         return $ CCEscCat p)
-             <|> try (do string "\\P{"
-                         p <- charProp
-                         char '}'
-                         return $ CCEscCompl p)
+charClassEsc =   
+      try (singleCharEsc                          >>= \c   -> return $ CCEscSingleChar c)
+  <|> try (char '\\' >> oneOf twoCharacterEscapes >>= \mce -> return $ CCEscMultiChar  mce)
+  <|> try (do string "\\p{"
+              p <- charProp
+              char '}'
+              return $ CCEscCat p)
+  <|> try (do string "\\P{"
+              p <- charProp
+              char '}'
+              return $ CCEscCompl p)
 
 charProp :: Parser CharProp
 charProp = try (charCategory             >>= \c  -> return $ Category c)
