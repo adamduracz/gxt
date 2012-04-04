@@ -1,28 +1,19 @@
 module RegEx where
 
-import qualified Test.QuickCheck as Q
-import qualified Test.QuickCheck.Gen as G
-import Control.Applicative hiding ( (<|>), many )
-import Control.Monad
 import Text.ParserCombinators.Parsec
-import Text.ParserCombinators.Parsec.Expr
-
--- import Data.CharSet.Unicode.Block ( blocks )
 
 ------------------------------------------------------------------------
 -- Regular expression parser, based on 
 -- http://books.google.se/books?id=Xw3_tzEJVEwC&lpg=PA450&ots=03NoIOjq9D&dq=negchargroup&pg=PA447#v=onepage&q&f=false
 -- Notable departures from above spec are:
--- - Because XML schema regexes do not support lazy quantifiers, 
---   the Quantifier and Indicator constructs have been merged 
---   as QuantIndicator
+-- - Because XML schema regexes do not support lazy quantifiers, the 
+--   Quantifier and Indicator constructs have been merged as QuantIndicator
 -- - No backreferences because XML schema regexes do not support it
 ------------------------------------------------------------------------
 
 ------------------------------------------------------------------------
 -- TODO
 -- - Implement CharCategory based on table on page 924 of Kay book
--- - Clean up imports
 -- - Subexpressions (see page 918 of Kay book)
 ------------------------------------------------------------------------
 
@@ -109,7 +100,7 @@ type BlockName        = String
 -- Constants
 ------------------------------------------------------------------------
                                   
-singleCharacterEscapes = "nrt\\|.?*+(){}-[]^$" -- \\ should be \\\\?
+singleCharacterEscapes = "nrt\\|.?*+(){}-[]^$" -- TODO Verify that it's really \\ and not \\\\
 twoCharacterEscapes    = "sSiIcCdDwW"
 digits                 = "0123456789"
 
