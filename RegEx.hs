@@ -68,8 +68,8 @@ data CharGroup        = CGroupPos          PosCharGroup
 
 data PosCharGroup     = PosCharGroup [PosCharGroupItem] deriving (Eq,Show)
 
-data PosCharGroupItem = PosCharGroupRange        [CharRange]
-                      | PosCharGroupCharClassEsc [CharClassEsc]
+data PosCharGroupItem = PosCharGroupRange        CharRange
+                      | PosCharGroupCharClassEsc CharClassEsc
                       deriving (Eq,Show)
 
 data NegCharGroup     = NegCharGroup PosCharGroup deriving (Eq,Show)
@@ -125,58 +125,96 @@ branch :: Parser Branch
 branch = many piece >>= \ps -> return $ Branch ps
 
 piece :: Parser Piece
-piece =   (try $ do a <- atom
-                    q <- quantIndicator
-                    return $ Piece a $ Just q)
-      <|> (try $ do a <- atom
-                    return $ Piece a   Nothing)
+piece =   try (do a <- atom
+                  q <- quantIndicator
+                  return $ Piece a $ Just q)
+      <|> try (do a <- atom
+                  return $ Piece a   Nothing)
 
 -- Quantifiers
 quantIndicator =   try (char '?' >> (return  QQuestionMark))
                <|> try (char '*' >> (return  QStar))
                <|> try (char '+' >> (return  QPlus))
                <|> try (between (char '{') (char '}')
-                                (do min <- oneOf digits
+                                (do min <- quantExact
                                     char ','
-                                    max <- oneOf digits
-                                    return $ QQuantRange (digitToInt min) (digitToInt max)))
+                                    max <- quantExact
+                                    return $ QQuantRange min max))
                <|> try (between (char '{') (char '}')
-                                (do min <- oneOf digits
+                                (do min <- quantExact
                                     char ','
-                                    return $ QQuantMin $ digitToInt min))
-               <|> try (between (char '{') (char '}')
-                                (do exact <- oneOf digits
-                                    return $ QQuantExact $ digitToInt exact))
+                                    return $ QQuantMin min))
+               <|>     (between (char '{') (char '}')
+                                (do exact <- quantExact
+                                    return $ QQuantExact exact))
+
+quantExact :: Parser Int
+quantExact = many1 (oneOf digits) >>= \q -> return $ read q
 
 -- Atoms
 atom :: Parser Atom
 atom =   try (noneOf ".\\?*+|^${}()[]"            >>= \c  -> return $ AChar      c)
      <|> try (charClass                           >>= \cc -> return $ ACharClass cc)
-     <|> try (between (char '(') (char ')') regEx >>= \r  -> return $ ABrackets  r)
+     <|>     (between (char '(') (char ')') regEx >>= \r  -> return $ ABrackets  r)
 
+charClass :: Parser CharClass
 charClass =   try (charClassEsc  >>= \cce -> return $ CClassEsc  cce)
           <|> try (charClassExpr >>= \cce -> return $ CClassExpr cce)
           <|> try (char '.'      >>         (return   CClassDot))
           <|> try (char '^'      >>         (return   CClassHat))
-          <|> try (char '$'      >>         (return   CClassDollar))
+          <|>     (char '$'      >>         (return   CClassDollar))
 
+charClassExpr :: Parser CharClassExpr
 charClassExpr = between (char '[') (char ']') charGroup >>= \cg -> return $ CharClassExpr cg
 
 -- Character Groups
-
+charGroup :: Parser CharGroup
 charGroup =   try (posCharGroup >>= \g -> return $ CGroupPos          g)
           <|> try (negCharGroup >>= \g -> return $ CGroupNeg          g)
-          <|> try (charClassSub >>= \g -> return $ CGroupCharClassSub g)
+          <|>     (charClassSub >>= \g -> return $ CGroupCharClassSub g)
 
-posCharGroup = undefined
+-- TODO Specifically test this contraption!! Might not to work...
+posCharGroup :: Parser PosCharGroup
+posCharGroup = do gis <- many1 (try (charRange    >>= \cr -> return $ PosCharGroupRange        cr)
+                                <|> (charClassEsc >>= \cr -> return $ PosCharGroupCharClassEsc cr)) 
+                  return $ PosCharGroup gis
 
-negCharGroup = undefined
+negCharGroup :: Parser NegCharGroup 
+negCharGroup = char '^' >> posCharGroup >>= \pcg -> return $ NegCharGroup pcg
 
-charClassSub = undefined
+charClassSub :: Parser CharClassSub
+charClassSub = try (do pcg <- posCharGroup
+                       char '-'
+                       cce <- charClassExpr
+                       return $ CharClassSubPos pcg cce)
+               <|> (do ncg <- negCharGroup
+                       char '-'
+                       cce <- charClassExpr
+                       return $ CharClassSubNeg ncg cce)
+
+-- Character Ranges
+charRange :: Parser CharRange
+charRange = try (do min <- charOrEsc
+                    max <- charOrEsc
+                    return $ CodePointRange min max)
+            <|> (xmlCharIncDash >>= \c   -> return $ XmlCharIncDash c)
+
+charOrEsc :: Parser CharOrEsc
+charOrEsc = try (xmlChar       >>= \c   -> return $ CharOrEscXmlChar       c)
+            <|> (singleCharEsc >>= \sce -> return $ CharOrEscSingleCharEsc sce)
+
+xmlChar :: Parser Char
+xmlChar = noneOf "[]\\-"
+
+xmlCharIncDash :: Parser Char
+xmlCharIncDash = noneOf "[]\\"
 
 -- Character Class Escapes
-
+charClassEsc :: Parser CharClassEsc
 charClassEsc = undefined
+
+singleCharEsc :: Parser SingleCharEsc
+singleCharEsc = undefined
 
 
 {-
