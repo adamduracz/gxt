@@ -277,7 +277,19 @@ genCharClassEsc :: R.CharClassEsc -> Q.Gen String
 genCharClassEsc ccesc =
   case ccesc of
     R.CCEscSingleChar sce -> genSingleCharEsc sce >>= \c -> return [c]
-    R.CCEscMultiChar  c   -> return [c]
+    R.CCEscMultiChar  c   -> 
+      case c of
+        's' -> singletonOf [' ','\t','\n','\r']
+        --'S' -> -- TODO Implement using ^
+        --'i' -> 
+        --'I' -> -- TODO Implement using ^
+        --'c' -> 
+        --'C' -> -- TODO Implement using ^
+        'd' -> singletonOf digitCharacters
+        -- TODO Reimpl. using ^
+        'D' -> Q.elements nonDigitCharacters >>= \c -> return $ xmlEncode [c] 
+        --'w' -> 
+        --'W' -> -- TODO Implement using ^
     R.CCEscCat        cp  -> error "Generator for character categories not implemented."
     R.CCEscCompl      cp  -> error "Generator for character category compl. not implemented."
 
@@ -323,39 +335,6 @@ genCharClassSub ccs = error "TODO Implement genCharClassSub."
 
 genSingleCharEsc :: R.SingleCharEsc -> Q.Gen Char
 genSingleCharEsc (R.SingleCharEsc c) = return c
-
-
-
-
-{-
-  R.Literal c -> case c of
-    '.' -> Q.elements stringCharacters >>= \c -> return $ xmlEncode [c] 
-    c   -> return [c]
-  R.SCEscape c -> return [c]
-  R.TCEscape c -> 
-    case c of
-      's' -> singletonOf [' ','\t','\n','\r']
-      --'S' -> -- TODO Implement using ^
-      --'i' -> 
-      --'I' -> -- TODO Implement using ^
-      --'c' -> 
-      --'C' -> -- TODO Implement using ^
-      'd' -> singletonOf digitCharacters
-      'D' -> Q.elements nonDigitCharacters >>= \c -> return $ xmlEncode [c] -- TODO Reimpl. using ^
-      --'w' -> 
-      --'W' -> -- TODO Implement using ^
-  R.Sequence rs -> 
-    do ms <- sequence $ map genMatch rs
-       return $ concat ms
-  R.Choice rs -> Q.oneof $ map genMatch rs 
-  R.Repeat (min, Just max) rr -> 
-    do ms <- sizedListOf (Occurs min) (Occurs max) $ genMatch rr
-       return $ concat ms
-  R.Repeat (min, Nothing) rr -> 
-    do init <- Q.vectorOf min $ genMatch rr
-       rest <- Q.listOf       $ genMatch rr
-       return $ concat init ++ concat rest
--}
 
 ------------------------------------------------------------------------
 -- Generator combinators
