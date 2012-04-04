@@ -339,7 +339,7 @@ nodeToAny (EmpNode _ as) = Any namespace (minOccurs as) (maxOccurs as)
 
 -- AttributeGroup
 nodeToAttributeGroup :: Namespace -> Node -> AttributeGroup
-nodeToAttributeGroup tns node@(ElmNode n as (ElmList els)) = --TODO Take into acount tns
+nodeToAttributeGroup tns node@(ElmNode n as (ElmList els)) = --TODO Take into account tns
   AttributeGroup (lookupE "name" $ as)
                  [ nodeToAttribute tns an | an <- elems node, name an == "xsd:attribute" ]
 

@@ -7,7 +7,7 @@
 
 module Main where
 
-import Generator hiding (main)
+import Generator
 import Schema
 import XmlParser
 import qualified Data.Maybe as M

@@ -221,16 +221,16 @@ genMatch r = case r of
   R.SCEscape c -> return [c]
   R.TCEscape c -> 
     case c of
-      --'s'
-      --'S'
-      --'i'
-      --'I'
-      --'c'
-      --'C'
-      'd' -> Q.elements    digitCharacters >>= \c -> return [c]
-      'D' -> Q.elements nonDigitCharacters >>= \c -> return $ xmlEncode [c]
-      --'w'
-      --'W'
+      's' -> singletonOf [' ','\t','\n','\r']
+      --'S' -> -- TODO Implement using ^
+      --'i' -> 
+      --'I' -> -- TODO Implement using ^
+      --'c' -> 
+      --'C' -> -- TODO Implement using ^
+      'd' -> singletonOf digitCharacters
+      'D' -> Q.elements nonDigitCharacters >>= \c -> return $ xmlEncode [c] -- TODO Reimpl. using ^
+      --'w' -> 
+      --'W' -> -- TODO Implement using ^
   R.Sequence rs -> 
     do ms <- sequence $ map genMatch rs
        return $ concat ms
@@ -242,7 +242,7 @@ genMatch r = case r of
     do init <- Q.vectorOf min $ genMatch rr
        rest <- Q.listOf       $ genMatch rr
        return $ concat init ++ concat rest
-  
+
 -- TODO Add map of string chars to generate with as optional CLI parameter
 genString :: Q.Gen String
 genString = 
@@ -297,6 +297,9 @@ foldGen gs f = aux gs []
       then return vals 
       else do v <- head gens
               aux (tail gens) (f v vals)
+
+singletonOf :: [a] -> Q.Gen [a]
+singletonOf list = Q.elements list >>= \c -> return [c]
 
 ------------------------------------------------------------------------
 -- Utility generators
