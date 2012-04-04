@@ -23,6 +23,7 @@ import Data.Char ( digitToInt )
 -- TODO
 -- - Implement CharCategory based on table on page 924 of Kay book
 -- - Clean up imports
+-- - Subexpressions (see page 918 of Kay book)
 ------------------------------------------------------------------------
 
 
@@ -153,16 +154,29 @@ atom =   try (noneOf ".\\?*+|^${}()[]"            >>= \c  -> return $ AChar     
      <|> try (charClass                           >>= \cc -> return $ ACharClass cc)
      <|> try (between (char '(') (char ')') regEx >>= \r  -> return $ ABrackets  r)
 
-charClass =   try charClassEsc 
-          <|> try charClassExpr
-          <|> try (char '.' >> (return CClassDot))
-          <|> try (char '^' >> (return CClassHat))
-          <|> try (char '$' >> (return CClassDollar))
+charClass =   try (charClassEsc  >>= \cce -> return $ CClassEsc  cce)
+          <|> try (charClassExpr >>= \cce -> return $ CClassExpr cce)
+          <|> try (char '.'      >>         (return   CClassDot))
+          <|> try (char '^'      >>         (return   CClassHat))
+          <|> try (char '$'      >>         (return   CClassDollar))
+
+charClassExpr = between (char '[') (char ']') charGroup >>= \cg -> return $ CharClassExpr cg
+
+-- Character Groups
+
+charGroup =   try (posCharGroup >>= \g -> return $ CGroupPos          g)
+          <|> try (negCharGroup >>= \g -> return $ CGroupNeg          g)
+          <|> try (charClassSub >>= \g -> return $ CGroupCharClassSub g)
+
+posCharGroup = undefined
+
+negCharGroup = undefined
+
+charClassSub = undefined
+
+-- Character Class Escapes
 
 charClassEsc = undefined
-
-charClassExpr = undefined
-
 
 
 {-
