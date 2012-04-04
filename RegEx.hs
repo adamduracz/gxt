@@ -2,10 +2,12 @@ module RegEx where
 
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
-import Control.Applicative hiding ((<|>))
+import Control.Applicative hiding ( (<|>), many )
 import Control.Monad
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
+
+import Data.Char ( digitToInt )
 
 ------------------------------------------------------------------------
 -- Regular expression parser, based on 
@@ -20,6 +22,7 @@ import Text.ParserCombinators.Parsec.Expr
 ------------------------------------------------------------------------
 -- TODO
 -- - Implement CharCategory based on table on page 924 of Kay book
+-- - Clean up imports
 ------------------------------------------------------------------------
 
 
@@ -28,12 +31,13 @@ import Text.ParserCombinators.Parsec.Expr
 ------------------------------------------------------------------------
 
 -- Top-level (Branches and Pieces)
-data RegEx          = Choice [Branch]                   deriving (Eq,Show)
-data Branch         = Branch [Piece]                    deriving (Eq,Show)
-data Piece          = Piece Atom (Maybe QuantIndicator) deriving (Eq,Show) 
+data RegEx            = Choice [Branch]                   deriving (Eq,Show)
+data Branch           = Branch [Piece]                    deriving (Eq,Show)
+data Piece            = Piece Atom (Maybe QuantIndicator) deriving (Eq,Show) 
 
--- Quantifiers
-data QuantIndicator  = QQuestionMark
+-- Quantifiers                  
+
+data QuantIndicator   = QQuestionMark
                       | QStar
                       | QPlus
                       | QQuantRange Int Int
@@ -70,7 +74,7 @@ data PosCharGroupItem = PosCharGroupRange        [CharRange]
 data NegCharGroup     = NegCharGroup PosCharGroup deriving (Eq,Show)
 
 data CharClassSub     = CharClassSubPos PosCharGroup CharClassExpr
-                      | CharClassSubNeg CGroupNeg    CharClassExpr
+                      | CharClassSubNeg NegCharGroup CharClassExpr
                       deriving (Eq,Show)
 
 -- Character Ranges
@@ -106,14 +110,62 @@ type BlockName        = String
                                   
 singleCharacterEscapes = "nrt.\\\\?*+|^${}()[]"
 twoCharacterEscapes    = "sSiIcCdDwW"
+digits                 = "0123456789"
 
 ------------------------------------------------------------------------
 -- RegEx Parser
 ------------------------------------------------------------------------
 
+-- Top-level (Branches and Pieces)
 regEx :: Parser RegEx
-regEx = 
+regEx = sepBy1 branch (char '|') >>= \bs -> return $ Choice bs
 
+branch :: Parser Branch
+branch = many piece >>= \ps -> return $ Branch ps
+
+piece :: Parser Piece
+piece =   (try $ do a <- atom
+                    q <- quantIndicator
+                    return $ Piece a $ Just q)
+      <|> (try $ do a <- atom
+                    return $ Piece a   Nothing)
+
+-- Quantifiers
+quantIndicator =   try (char '?' >> (return  QQuestionMark))
+               <|> try (char '*' >> (return  QStar))
+               <|> try (char '+' >> (return  QPlus))
+               <|> try (between (char '{') (char '}')
+                                (do min <- oneOf digits
+                                    char ','
+                                    max <- oneOf digits
+                                    return $ QQuantRange (digitToInt min) (digitToInt max)))
+               <|> try (between (char '{') (char '}')
+                                (do min <- oneOf digits
+                                    char ','
+                                    return $ QQuantMin $ digitToInt min))
+               <|> try (between (char '{') (char '}')
+                                (do exact <- oneOf digits
+                                    return $ QQuantExact $ digitToInt exact))
+
+-- Atoms
+atom :: Parser Atom
+atom =   try (noneOf ".\\?*+|^${}()[]"            >>= \c  -> return $ AChar      c)
+     <|> try (charClass                           >>= \cc -> return $ ACharClass cc)
+     <|> try (between (char '(') (char ')') regEx >>= \r  -> return $ ABrackets  r)
+
+charClass =   try charClassEsc 
+          <|> try charClassExpr
+          <|> try (char '.' >> (return CClassDot))
+          <|> try (char '^' >> (return CClassHat))
+          <|> try (char '$' >> (return CClassDollar))
+
+charClassEsc = undefined
+
+charClassExpr = undefined
+
+
+
+{-
   -- Parsers
   scesc         = try $ char '\\' >> oneOf singleCharacterEscapes >>= return
   tcesc         = try $ char '\\' >> oneOf twoCharacterEscapes >>= return
@@ -132,6 +184,7 @@ regEx =
 
   choiceTerms (Choice ts) = ts
   choiceTerms t = [t]
+-}
 
 readRegEx :: String -> RegEx
 readRegEx input = case parse regEx "regEx" input of
@@ -142,6 +195,7 @@ readRegEx input = case parse regEx "regEx" input of
 -- Utility functions
 ------------------------------------------------------------------------
 
+{-
 literals :: RegEx -> [Char]
 literals r = case r of
   Epsilon     -> []
@@ -151,6 +205,7 @@ literals r = case r of
   Sequence rs -> concatMap literals rs
   Repeat _ r  -> literals r
   Choice rs   -> concatMap literals rs
+-}
 
 main1 = parseTest regEx "he(llo)*|wor+ld?"
 
