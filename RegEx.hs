@@ -7,7 +7,7 @@ import Control.Monad
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
 
-import Data.Char ( digitToInt )
+import Data.CharSet.Unicode.Block ( blocks )
 
 ------------------------------------------------------------------------
 -- Regular expression parser, based on 
@@ -109,7 +109,7 @@ type BlockName        = String
 -- Constants
 ------------------------------------------------------------------------
                                   
-singleCharacterEscapes = "nrt.\\\\?*+|^${}()[]"
+singleCharacterEscapes = "nrt\\|.?*+(){}-[]^$" -- \\ should be \\\\?
 twoCharacterEscapes    = "sSiIcCdDwW"
 digits                 = "0123456789"
 
@@ -211,41 +211,38 @@ xmlCharIncDash = noneOf "[]\\"
 
 -- Character Class Escapes
 charClassEsc :: Parser CharClassEsc
-charClassEsc = undefined
+charClassEsc =   try (singleCharEsc                          >>= \c   -> return $ CCEscSingleChar c)
+             <|> try (char '\\' >> oneOf twoCharacterEscapes >>= \mce -> return $ CCEscMultiChar  mce)
+             <|> try (do string "\\p{"
+                         p <- charProp
+                         char '}'
+                         return $ CCEscCat p)
+             <|> try (do string "\\P{"
+                         p <- charProp
+                         char '}'
+                         return $ CCEscCompl p)
+
+charProp :: Parser CharProp
+charProp = try (charCategory             >>= \c  -> return $ Category c)
+           <|> (string "Is" >> blockName >>= \bn -> return $ IsBlock bn)
+
+blockName :: Parser BlockName
+blockName = error $ "TODO Implement blockName parser based on Data.CharSet.Unicode.Block"
+
+charCategory :: Parser CharCategory
+charCategory = error $ "TODO Implement charCategory parser based on Data.CharSet.Unicode.Category"
 
 singleCharEsc :: Parser SingleCharEsc
-singleCharEsc = undefined
+singleCharEsc = char '\\' >> oneOf singleCharacterEscapes >>= \e -> return $ SingleCharEsc e
 
-
-{-
-  -- Parsers
-  scesc         = try $ char '\\' >> oneOf singleCharacterEscapes >>= return
-  tcesc         = try $ char '\\' >> oneOf twoCharacterEscapes >>= return
-  lit           = try $ noneOf ".\\?*+|^${}()[]"
-  charClassExpr = between (char '[') (char ']')
-  charGroup     = try $ posCharGroup <|> negCharGroup <|> charClassSub
-  posCharGroup  = between (char '(') (char ')')
-  negCharGroup  = try $ (char '^') >> posCharGroup
-  charClassSub  = try $ (posCharGroup <|> negCharGroup) >> (char '-') >> charClassExpr
-
-  sequence a b = Sequence $ (seqTerms a) ++ (seqTerms b)
-  choice a b   = Choice $ (choiceTerms a) ++ (choiceTerms b)
-
-  seqTerms (Sequence ts) = ts
-  seqTerms t = [t]
-
-  choiceTerms (Choice ts) = ts
-  choiceTerms t = [t]
--}
+------------------------------------------------------------------------
+-- Utility functions
+------------------------------------------------------------------------
 
 readRegEx :: String -> RegEx
 readRegEx input = case parse regEx "regEx" input of
 	Right val -> val
 	Left  err -> error $ show err
-
-------------------------------------------------------------------------
--- Utility functions
-------------------------------------------------------------------------
 
 {-
 literals :: RegEx -> [Char]
