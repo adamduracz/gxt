@@ -7,7 +7,7 @@ import Control.Monad
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
 
-import Data.CharSet.Unicode.Block ( blocks )
+-- import Data.CharSet.Unicode.Block ( blocks )
 
 ------------------------------------------------------------------------
 -- Regular expression parser, based on 
