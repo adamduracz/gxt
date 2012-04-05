@@ -401,6 +401,15 @@ stringToQName s = case length cs of
   where
     cs = split s ':'                           
 
+autoRootElementName :: Schema -> Name -> Name
+autoRootElementName s n =
+  if null n
+  then let se = elements s in
+       if null se
+       then error "Schema contains no elements!"
+       else name $ head se
+  else n 
+
 readSchema :: String -> Schema
 readSchema = xmlDocToSchema . readTree
 

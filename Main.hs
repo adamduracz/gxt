@@ -35,7 +35,6 @@ inSchemaPathD    = "in.xsd"
 outSchemaPathD   = "out.xsd"
 xslPathD         = "transform.xsl"    
 numberOfRunsD    = 10
-rootElementNameD = "priceList"
 
 parseArgs :: IO (String,String,String,Int,Name)
 parseArgs = do args <- getArgs
@@ -44,13 +43,13 @@ parseArgs = do args <- getArgs
                                , inSchemaPathD
                                , outSchemaPathD
                                , numberOfRunsD
-                               , rootElementNameD
+                               , "" -- Autodetect root element name
                                )
                           3 -> ( args !! 0
                                , args !! 1
                                , args !! 2
                                , numberOfRunsD
-                               , rootElementNameD
+                               , "" -- Autodetect root element name
                                )
                           5 -> ( args !! 0
                                , args !! 1
@@ -58,12 +57,12 @@ parseArgs = do args <- getArgs
                                , read $ args !! 3
                                , args !! 4
                                )
-                          _ -> error "Use: faxt xslt in-xsd out-xsd [number-of-runs root-element-name]"
+                          _ -> error "Use: faxt xslt in-xsd out-xsd [number-of-runs] [root-element-name]"
 
 mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
            s <- readFile inSchemaPath
            let schema = readSchema s
-               gen = genSchema schema rootElementName
+               gen = genSchema schema $ autoRootElementName schema rootElementName
            putStrLn $ show schema
            randomXmlDocs <- generateTestData 1 gen
            mapM_ (putStrLn . show) randomXmlDocs
@@ -78,7 +77,7 @@ mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName)
 main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
           s <- readFile inSchemaPath
           let schema = readSchema s
-              gen = genSchema schema rootElementName
+              gen = genSchema schema $ autoRootElementName schema rootElementName
           randomXmlDocs <- generateTestData numberOfRuns gen
           --mapM_ (putStrLn . show) randomXmlDocs
           transformedDocs <- transformXmls randomXmlDocs xslPath
