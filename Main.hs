@@ -1,6 +1,7 @@
 
 ------------------------------------------------------------------------
 -- TODO
+-- - Make a better error report, also using syserr if it contains something interesting
 -- - Add option to write test cases which fail validation to disk
 -- - Add an error count to the report, and perhaps a digest of all the errors?
 ------------------------------------------------------------------------

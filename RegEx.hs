@@ -204,8 +204,8 @@ xmlCharIncDash = noneOf "[]\\"
 -- Character Class Escapes
 charClassEsc :: Parser CharClassEsc
 charClassEsc =   
-      try (singleCharEsc                          >>= \c   -> return $ CCEscSingleChar c)
-  <|> try (char '\\' >> oneOf twoCharacterEscapes >>= \mce -> return $ CCEscMultiChar  mce)
+      try (char '\\' >> oneOf twoCharacterEscapes >>= \mce -> return $ CCEscMultiChar  mce)
+  <|> try (singleCharEsc                          >>= \c   -> return $ CCEscSingleChar c)
   <|> try (do string "\\p{"
               p <- charProp
               char '}'
@@ -214,6 +214,7 @@ charClassEsc =
               p <- charProp
               char '}'
               return $ CCEscCompl p)
+  <|> (char '\\' >> noneOf "" >>= \c -> error $ "Unsupported single-character escape " ++ [c])
 
 charProp :: Parser CharProp
 charProp = try (charCategory             >>= \c  -> return $ Category c)
@@ -227,7 +228,6 @@ charCategory = error $ "TODO Implement charCategory parser based on Data.CharSet
 
 singleCharEsc :: Parser SingleCharEsc
 singleCharEsc = char '\\' >> oneOf singleCharacterEscapes >>= \e -> return $ SingleCharEsc e
-
 ------------------------------------------------------------------------
 -- Utility functions
 ------------------------------------------------------------------------
