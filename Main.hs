@@ -64,13 +64,13 @@ mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName)
            s <- readFile inSchemaPath
            let schema = readSchema s
                gen = genSchema schema $ autoRootElementName schema rootElementName
-           putStrLn $ show schema
+           --putStrLn $ show schema
            randomXmlDocs <- generateTestData 1 gen
            mapM_ (putStrLn . show) randomXmlDocs
            transformedDocs <- transformXmls randomXmlDocs xslPath
-           mapM_ (putStrLn . show) transformedDocs
+           --mapM_ (putStrLn . show) transformedDocs
            let docsToValidate = map (readTree . exitCode) transformedDocs
-           -- mapM_ (putStrLn . show) docsToValidate
+           --mapM_ (putStrLn . show) docsToValidate
            return ()
            where
              exitCode (_,e,_) = e

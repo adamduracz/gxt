@@ -11,6 +11,7 @@ import qualified RegEx as R
 ------------------------------------------------------------------------
 
 data Schema = Schema { targetNameSpace :: Name
+                     , xsdTypePrefix   :: Name
                      , elements        :: [Element]
                      , attributes      :: [Attribute]
                      , simpleTypes     :: [SimpleType] 
@@ -164,7 +165,8 @@ xmlDocToSchema
   , root     = ElmNode n as (ElmList elms)
   } = 
   Schema 
-  { targetNameSpace = lookupE "targetNamespace" as
+  { targetNameSpace = lookupE "targetNamespace"    as
+  , xsdTypePrefix   = getXsdTypePrefix x
   , elements        = convert "xsd:element"        nodeToElement
   , attributes      = convert "xsd:attribute"      nodeToAttribute
   , simpleTypes     = convert "xsd:simpleType"     nodeToSimpleType
@@ -173,30 +175,39 @@ xmlDocToSchema
   , attributeGroups = convert "xsd:attributeGroup" nodeToAttributeGroup
   }
   where
-    convert schemaComponentName converter = [ converter t n | n <- elms, name n == schemaComponentName ]
-    t = getTargetNamespacePrefix x
+    convert schemaComponentName converter = [ converter (getTargetNamespacePrefix x) n | n <- elms, name n == schemaComponentName ]
 
 getTargetNamespacePrefix :: XmlDoc -> Name
 getTargetNamespacePrefix x = 
-  head [ name (stringToQName an) | (an,av) <- as, av == tns
+  head [ name (stringToQName an) | (an,av) <- as
+                                 , av == tns
                                  , prefix (stringToQName an) == "xmlns" ]
   where
     as = attrs $ root x
     tns = lookupE "targetNamespace" as
-    prefix (QName p _) = p
+
+getXsdTypePrefix :: XmlDoc -> Name
+getXsdTypePrefix x =
+  head [ name (stringToQName an) | (an,av) <- as
+                                 , av == "http://www.w3.org/2001/XMLSchema"
+                                 , prefix (stringToQName an) == "xmlns" ]
+  where
+    as = attrs $ root x
+
+prefix :: QName -> Name
+prefix (QName p _) = p
 
 -- Element
 nodeToElement :: Namespace -> Node -> Element
 nodeToElement tns (ElmNode n as (ElmList els)) =
-  let elmName = lookupE "name" as in
   case name (head els) of
     "xsd:complexType" -> ElementWithComplexTypeDecl
-      (QName tns elmName)
+      (QName tns $ lookupE "name" as)
       (minOccurs as) (maxOccurs as)
       (nodeToComplexType tns (head els))
       Nothing
     "xsd:simpleType" -> ElementWithSimpleTypeDecl
-      (QName tns elmName)
+      (QName tns $ lookupE "name" as)
       (minOccurs as) (maxOccurs as)
       (nodeToSimpleType tns (head els))
       Nothing        
