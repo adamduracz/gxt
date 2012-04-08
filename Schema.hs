@@ -178,24 +178,22 @@ xmlDocToSchema
     convert schemaComponentName converter = [ converter (getTargetNamespacePrefix x) n | n <- elms, name n == schemaComponentName ]
 
 getTargetNamespacePrefix :: XmlDoc -> Name
-getTargetNamespacePrefix x = 
-  head [ name (stringToQName an) | (an,av) <- as
-                                 , av == tns
-                                 , prefix (stringToQName an) == "xmlns" ]
-  where
-    as = attrs $ root x
-    tns = lookupE "targetNamespace" as
+getTargetNamespacePrefix x = getNamespacePrefix (lookupE "targetNamespace" $ attrs $ root x) x
 
 getXsdTypePrefix :: XmlDoc -> Name
-getXsdTypePrefix x =
-  head [ name (stringToQName an) | (an,av) <- as
-                                 , av == "http://www.w3.org/2001/XMLSchema"
-                                 , prefix (stringToQName an) == "xmlns" ]
+getXsdTypePrefix x = getNamespacePrefix "http://www.w3.org/2001/XMLSchema" x
+
+-- | Returns the namespace prefix corresponding to an xmlns declaration
+getNamespacePrefix :: Namespace -> XmlDoc -> Name
+getNamespacePrefix ns x =
+  head [ name (stringToQName an)
+       | (an,av) <- as
+       , av == ns
+       , prefix (stringToQName an) == "xmlns"
+       ]
   where
     as = attrs $ root x
-
-prefix :: QName -> Name
-prefix (QName p _) = p
+    prefix (QName p _) = p
 
 -- Element
 nodeToElement :: Namespace -> Node -> Element
