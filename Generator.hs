@@ -41,6 +41,7 @@ type ElementName  = Name
 type QTypeName    = QName
 type QElementName = QName
 
+
 ------------------------------------------------------------------------
 -- Generators for XML schema types
 ------------------------------------------------------------------------
@@ -69,10 +70,9 @@ genElement e s = case e of
     genElement (lookupElement ref s) s 
   ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     sizedListOf mino maxo $ 
-      if isXsdType t s then
-        genTxtNode (reduceQName n s) [] $ genBaseType name
-      else
-        lookupTypeGen t s n
+      if isXsdType t s
+      then genTxtNode (reduceQName n s) [] $ genBaseType name
+      else lookupTypeGen t s n
   ElementWithSimpleTypeDecl n mino maxo t ms -> 
     sizedListOf mino maxo $ genTxtNodeSimpleType t s (reduceQName n s)
   ElementWithComplexTypeDecl n mino maxo t ms -> 

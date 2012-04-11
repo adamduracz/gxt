@@ -46,6 +46,12 @@ parseArgs = do args <- getArgs
                                , numberOfRunsD
                                , "" -- Autodetect root element name
                                )
+                          1 -> ( ""
+                               , inSchemaPathD
+                               , ""
+                               , 1
+                               , "" -- Autodetect root element name
+                               )
                           3 -> ( args !! 0
                                , args !! 1
                                , args !! 2
@@ -87,24 +93,25 @@ main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) 
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
           --mapM_ (putStrLn . show) valitationResults
-          putStrLn $ show $ makeReport valitationResults numberOfRuns
+          putStrLn $ makeReport valitationResults numberOfRuns
           return ()
           where
             exitCode (_,e,_) = e
 
-makeReport :: [ProcessOutput] -> Int -> String
-makeReport po numberOfRuns = case mergeValidationResults po of
-  Nothing  -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
-  (Just e) -> "Error found: " ++ e
+-- | Returns the first failing test case along with the corresponding validator output
+firstFailure :: [ProcessOutput] -> Maybe (Int, ProcessOutput)
+firstFailure pos = case failures of
+  [] -> Nothing
+  fs -> Just $ head fs
   where
-    mergeValidationResults :: [ProcessOutput] -> (Maybe String)
-    mergeValidationResults pos = foldr mergeFunction Nothing pos
-    mergeFunction :: ProcessOutput -> Maybe String -> Maybe String
-    mergeFunction _                               p@(Just previousError) = p
-    --TODO Make a better error report, also using syserr if it contains something interesting
-    mergeFunction (ExitSuccess,   _,      _)      _ = Nothing
-    mergeFunction (ExitFailure _, sysout, syserr) _ = Just $ sysout ++ syserr
+    failures = [ f | f@(_,(exitCode,_,_)) <- zip [1..] pos, exitCode /= ExitSuccess ]
 
+makeReport :: [ProcessOutput] -> Int -> String
+makeReport pos numberOfRuns = case firstFailure pos of
+  Nothing                            -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
+  Just (i,(ExitFailure _, out, err)) -> "Error found: \n" ++ err
+
+  
 transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
