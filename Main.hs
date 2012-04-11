@@ -93,25 +93,27 @@ main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) 
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
           --mapM_ (putStrLn . show) valitationResults
-          putStrLn $ makeReport valitationResults numberOfRuns
+          putStrLn $ makeReport docsToValidate valitationResults numberOfRuns
           return ()
           where
             exitCode (_,e,_) = e
 
 -- | Returns the first failing test case along with the corresponding validator output
-firstFailure :: [ProcessOutput] -> Maybe (Int, ProcessOutput)
+firstFailure :: [ProcessOutput] -> Maybe (Int, String)
 firstFailure pos = case failures of
   [] -> Nothing
   fs -> Just $ head fs
   where
-    failures = [ f | f@(_,(exitCode,_,_)) <- zip [1..] pos, exitCode /= ExitSuccess ]
+    failures = [ (i,stderr) 
+               | f@(i,(exitCode,_,stderr)) <- zip [1..] pos
+               , exitCode /= ExitSuccess 
+               ]
 
-makeReport :: [ProcessOutput] -> Int -> String
-makeReport pos numberOfRuns = case firstFailure pos of
-  Nothing                            -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
-  Just (i,(ExitFailure _, out, err)) -> "Error found: \n" ++ err
+makeReport :: [XmlDoc] -> [ProcessOutput] -> Int -> String
+makeReport docs pos numberOfRuns = case firstFailure pos of
+  Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
+  Just (i,err) -> "Error found:\n" ++ err ++ "\nTest case:\n" ++ (show $ docs !! i)
 
-  
 transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
