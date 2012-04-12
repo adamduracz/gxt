@@ -24,7 +24,12 @@ type Namespace = Name
 type Value = String
 type NSPrefix = String
 data QName = QName NSPrefix Name deriving (Eq)
-type Type = QName
+
+type TypeName     = Name
+type ElementName  = Name
+
+type QTypeName    = QName
+type QElementName = QName
 
 data Occurs = Occurs Int | Unbounded deriving (Eq,Show)
 type MinOccurs = Occurs
@@ -33,7 +38,7 @@ type MaxOccurs = Occurs
 -- http://www.w3.org/TR/xmlschema-1/#declare-element
 data Element 
   = ElementRef                 Ref   MinOccurs MaxOccurs             (Maybe SubstitutionGroup)
-  | ElementWithTypeRef         QName MinOccurs MaxOccurs Type        (Maybe SubstitutionGroup)
+  | ElementWithTypeRef         QName MinOccurs MaxOccurs QTypeName   (Maybe SubstitutionGroup)
   | ElementWithSimpleTypeDecl  QName MinOccurs MaxOccurs SimpleType  (Maybe SubstitutionGroup)
   | ElementWithComplexTypeDecl QName MinOccurs MaxOccurs ComplexType (Maybe SubstitutionGroup)
   deriving (Eq,Show)
@@ -42,9 +47,9 @@ data Element
 data SubstitutionGroup = SubstitutionGroup deriving (Eq,Show)
 
 data SimpleType 
-  = SimpleTypeRestriction (Maybe QName) BaseType Restriction 
-  | SimpleTypeList        (Maybe QName) ItemType
-  | SimpleTypeUnion       (Maybe QName) [SimpleType]
+  = SimpleTypeRestriction (Maybe QTypeName) BaseType Restriction 
+  | SimpleTypeList        (Maybe QTypeName) ItemType
+  | SimpleTypeUnion       (Maybe QTypeName) [SimpleType]
   deriving (Eq,Show)
 
 data Restriction = Enumeration [Value]
@@ -55,11 +60,11 @@ type BaseType = QName
 type ItemType = QName
 
 data ComplexType
-  = ComplexTypeAll            (Maybe QName) All            [Attribute]
-  | ComplexTypeChoice         (Maybe QName) Choice         [Attribute]
-  | ComplexTypeSequence       (Maybe QName) Sequence       [Attribute]
-  | ComplexTypeSimpleContent  (Maybe QName) SimpleContent  [Attribute]
-  | ComplexTypeComplexContent (Maybe QName) ComplexContent [Attribute]
+  = ComplexTypeAll            (Maybe QTypeName) All            [Attribute]
+  | ComplexTypeChoice         (Maybe QTypeName) Choice         [Attribute]
+  | ComplexTypeSequence       (Maybe QTypeName) Sequence       [Attribute]
+  | ComplexTypeSimpleContent  (Maybe QTypeName) SimpleContent  [Attribute]
+  | ComplexTypeComplexContent (Maybe QTypeName) ComplexContent [Attribute]
   deriving (Eq,Show)
 
 data Any      = Any      Namespace MinOccurs MaxOccurs deriving (Eq,Show)
@@ -80,7 +85,7 @@ data SimpleContent = SimpleContent deriving (Eq,Show)
 data ComplexContent = ComplexContent deriving (Eq,Show)
  
 data Attribute = AttributeRef          Ref              Use
-               | AttributeWithTypeRef  QName Type       Use 
+               | AttributeWithTypeRef  QName QTypeName  Use 
                | AttributeWithTypeDecl QName SimpleType Use
                deriving (Eq,Show)
 
@@ -401,6 +406,17 @@ lookupElement ref typingContext =
     Just a  -> a
     Nothing -> error $ "Element " ++ show ref ++ " not found in schema!"
 
+lookupSimpleType :: QTypeName -> Schema -> SimpleType
+lookupSimpleType t typingContext =
+  case findByMaybeQName t (simpleTypes typingContext) of
+    Just a  -> a
+    Nothing -> error $ "SimpleType " ++ show t ++ " not found in schema!"
+
+lookupComplexType :: QTypeName -> Schema -> ComplexType
+lookupComplexType t typingContext =
+  case findByMaybeQName t (complexTypes typingContext) of
+    Just a  -> a
+    Nothing -> error $ "ComplexType " ++ show t ++ " not found in schema!"
 
 stringToQName :: String -> QName
 stringToQName "" = QName "" ""
@@ -435,6 +451,9 @@ lookupD a l d =
   case lookup a l of
     Just b  -> b
     Nothing -> d
+
+lookupEQNamed :: Show a => QNamed a => QName -> [a] -> a
+lookupEQNamed n es = lookupE n $ zip (map qname es) es
 
 split :: String -> Char -> [String]
 split [] delim = [""]

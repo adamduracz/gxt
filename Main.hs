@@ -26,10 +26,12 @@ import System.Random
   , split
   , newStdGen
   )
-import System.Process (readProcessWithExitCode)
+import System.Process ( readProcessWithExitCode )
+import System.IO.Unsafe ( unsafePerformIO )
 
-type ProcessInput  = (FilePath, [String], String)
-type ProcessOutput = (ExitCode,  String , String)
+type ErrorString   = String
+type ProcessInput  = (FilePath, [String], ErrorString)
+type ProcessOutput = (ExitCode,  String , ErrorString)
 
 -- TODO Extract these as command line parameters
 inSchemaPathD    = "in.xsd"
@@ -99,13 +101,13 @@ main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) 
             exitCode (_,e,_) = e
 
 -- | Returns the first failing test case along with the corresponding validator output
-firstFailure :: [ProcessOutput] -> Maybe (Int, String)
+firstFailure :: [ProcessOutput] -> Maybe (Int, ErrorString)
 firstFailure pos = case failures of
   [] -> Nothing
   fs -> Just $ head fs
   where
     failures = [ (i,stderr) 
-               | f@(i,(exitCode,_,stderr)) <- zip [1..] pos
+               | f@(i,(exitCode,_,stderr)) <- zip [0..] pos
                , exitCode /= ExitSuccess 
                ]
 
@@ -114,7 +116,7 @@ makeReport docs pos numberOfRuns = case firstFailure pos of
   Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
   Just (i,err) -> "Error found:\n" ++ err ++ "\nTest case:\n" ++ (show $ docs !! i)
 
-transformXmls :: [G.XmlDoc] -> String -> IO [ProcessOutput] 
+transformXmls :: [G.XmlDoc] -> FilePath -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
   return resultTriples
@@ -123,7 +125,7 @@ transformXmls xmlDocs xsltPath = do
     readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
 -- | Produces a triple of input for the readProcessWithExitCode function
-transformCommand :: G.XmlDoc -> String -> ProcessInput
+transformCommand :: G.XmlDoc -> FilePath -> ProcessInput
 transformCommand inputDoc xslPath =
   ( "xsltproc"    -- Path to the XSL transform command (xsltproc)  
   , [ xslPath     -- Path to the stylesheet
@@ -132,7 +134,7 @@ transformCommand inputDoc xslPath =
   , show inputDoc -- The XML string, will be passed to xsltproc through stdin
   )
 
-validateXmls :: [X.XmlDoc] -> String -> IO [ProcessOutput]
+validateXmls :: [X.XmlDoc] -> FilePath -> IO [ProcessOutput]
 validateXmls xmlDocs schemaPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
   return resultTriples
@@ -140,7 +142,13 @@ validateXmls xmlDocs schemaPath = do
       cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
       readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
-validateXmlCommand :: X.XmlDoc -> String -> ProcessInput
+unsafeValidateXmlDoc :: X.XmlDoc -> FilePath -> Maybe String
+unsafeValidateXmlDoc xmlDocs schemaPath =
+  case head $ unsafePerformIO $ validateXmls [xmlDocs] schemaPath of
+    (ExitSuccess,   _, _)   -> Nothing
+    (ExitFailure _, _, err) -> Just err
+
+validateXmlCommand :: X.XmlDoc -> FilePath -> ProcessInput
 validateXmlCommand docToValidate schemaPath =
   ( "xmllint"          -- Path to the XML validator command (xmllint)  
   , [ "--noout"        -- Prevent xmllint from writing output to stdout

@@ -35,16 +35,11 @@ nonDigitCharacters = [ c | c <- stringCharacters, not $ c `elem` digitCharacters
 -- Type declarations
 ------------------------------------------------------------------------
 
-type TypeName     = Name
-type ElementName  = Name
-
-type QTypeName    = QName
-type QElementName = QName
-
 data XmlDoc =
     XmlDoc { version  :: String
            , encoding :: String
            , root     :: Node
+           , source   :: SchemaSource
            }
 
 data Node = ElmNode Name [Attr] [Node] NodeSource
@@ -56,8 +51,9 @@ type Name = String
 type Attr = (Name, String, AttrSource)
 
 --Below, 'Nothing' is used when the definition did not come from the schema
-type NodeSource = Maybe Element 
-type AttrSource = Maybe Attribute
+type NodeSource   = Maybe Element
+type AttrSource   = Maybe Attribute
+type SchemaSource = Maybe Schema
 
 ------------------------------------------------------------------------
 -- Classes and instances
@@ -116,7 +112,8 @@ genSchema s rootElementName =
      return XmlDoc
             { version  = "1.0" -- TODO These things should be taken from the Schema
             , encoding = "ISO-8859-1"
-            , root = r'
+            , root     = r'
+            , source   = Just s
             }
   where
     rootElement = (case findByName rootElementName $ elements s of
