@@ -11,6 +11,8 @@ module Main where
 import qualified Generator as G
 import Schema
 import qualified XmlParser as X
+import Shrink ( shrinkXmlDoc )
+
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
@@ -95,7 +97,7 @@ main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) 
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
           --mapM_ (putStrLn . show) valitationResults
-          putStrLn $ makeReport docsToValidate valitationResults numberOfRuns
+          putStrLn $ makeReport randomXmlDocs docsToValidate valitationResults numberOfRuns
           return ()
           where
             exitCode (_,e,_) = e
@@ -111,10 +113,19 @@ firstFailure pos = case failures of
                , exitCode /= ExitSuccess 
                ]
 
-makeReport :: [X.XmlDoc] -> [ProcessOutput] -> Int -> String
-makeReport docs pos numberOfRuns = case firstFailure pos of
+makeReport :: [G.XmlDoc] -> [X.XmlDoc] -> [ProcessOutput] -> Int -> String
+makeReport inputDocs outputDocs pos numberOfRuns = case firstFailure pos of
   Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
-  Just (i,err) -> "Error found:\n" ++ err ++ "\nTest case:\n" ++ (show $ docs !! i)
+  Just (i,err) -> case shrink firstFailureInput of
+    Nothing            -> "Error found:\n" ++ err ++ "\nTest case (unshrunk):\n" ++ show firstFailureOutput
+    -- TODO Implement shrink count
+    Just shrunkOutput  -> "Error found:\n" ++ err ++ "\nTest case (shrunk):\n"   ++ show shrunkOutput
+    where
+      firstFailureInput  = inputDocs  !! i
+      firstFailureOutput = outputDocs !! i
+
+shrink :: G.XmlDoc -> Maybe G.XmlDoc
+shrink = error "shrink"
 
 transformXmls :: [G.XmlDoc] -> FilePath -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
