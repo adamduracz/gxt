@@ -7,6 +7,7 @@ import Data.List
   , tails 
   , isPrefixOf
   )
+import Debug.Trace
 
 shrinkXmlDoc :: XmlDoc -> [XmlDoc]
 shrinkXmlDoc
@@ -14,53 +15,72 @@ shrinkXmlDoc
            , encoding = e
            , root     = node
            , source   = js@(Just s)
-           } ) = 
+           } ) =
   [ XmlDoc { version  = v 
            , encoding = e
            , root     = r
            , source   = js
            }
-  | r <- shrinkNode node s
+  | r <- shrinkNode node
   ]
 
--- TODO Check if this needs to take a [Element] in case several
--- possible elements gave rise to the Node
-shrinkNode :: Node -> Schema -> [Node]
-shrinkNode node schema = case node of
+shrinkNode :: Node -> [Node]
+shrinkNode node = case node of
   ElmNode n as els me ->
     case me of 
-      Nothing -> [node] -- Can't shrink
+      Nothing -> [node] -- No schema information, can't shrink!
       Just e  -> [ ElmNode n as' els' me
-                 | as'  <- shrinkAttrs as schema
-                 , els' <- map (\e -> shrinkNode e schema) els
+                 | as'  <- shrinkAttrs as
+                 , els' <- shrinkChildNodes els
                  ]
   TxtNode n as s me ->
     case me of 
-      Nothing -> [node] -- Can't shrink
+      Nothing -> [node] -- No schema information, can't shrink!
       Just e  -> [ TxtNode n as' s' me
-                 | as' <- shrinkAttrs as schema
+                 | as' <- shrinkAttrs as
                  , s'  <- shrinkString s e
                  ]
   EmpNode n as me ->
     case me of 
-      Nothing -> [node] -- Can't shrink
+      Nothing -> [node] -- No schema information, can't shrink!
       Just e  -> [ EmpNode n as' me
-                 | as' <- shrinkAttrs as schema
+                 | as' <- shrinkAttrs as
                  ]
 
-shrinkString s e = [s] -- TODO Implement shrinkString
+shrinkString s e = [s] -- TODO Implement shrinkString (shrinking of simpleTypes)
 
-shrinkAttrs :: [Attr] -> Schema -> [[Attr]]
-shrinkAttrs as schema = 
-  [ [ a 
-    | a <- as
-    , not $ a `elem` s ]
-  | s <- powerset $ shrinkableAttrs
-  ]
+trc a  = trace (show a) a
+tr s a = trace (s ++ show a) a
+tl l a = trace (show $ l a) a 
+
+shrinkChildNodes :: [Node] -> [[Node]]
+shrinkChildNodes ns =
+  [ mandatoryChildNodes ++ son
+  | on  <- powerset optionalChildNodes
+  , son <- map shrinkNode on
+  -- TODO Implement shrinking of mandatory nodes
+  --, smn <- map shrinkNode mandatoryChildNodes
+  ] 
   where
-    shrinkableAttrs = [ a | a <- as, canShrink a schema ]
-    canShrink :: Attr -> Schema -> Bool
-    canShrink (name,_,source) schema =
+    mandatoryChildNodes  = filter (not.optional) ns
+    optionalChildNodes   = filter      optional  ns
+    optional :: Node -> Bool
+    optional node = case node of
+      ElmNode _ _ _ me -> isOpt me
+      TxtNode _ _ _ me -> isOpt me
+      EmpNode _ _   me -> isOpt me
+    isOpt me = case me of
+        Nothing -> False -- No schema information, can't shrink!
+        Just e  -> Occurs 0 == (fst $ getBounds e)
+
+shrinkAttrs :: [Attr] -> [[Attr]]
+shrinkAttrs as = 
+  [ mandatoryAttrs ++ oa | oa <- powerset optionalAttrs ]
+  where
+    mandatoryAttrs = filter (not.optional) as
+    optionalAttrs  = filter      optional  as
+    optional :: Attr -> Bool
+    optional (name,_,source) =
       if isPrefixOf "xmlns" name
       then False
       else case source of
@@ -68,26 +88,6 @@ shrinkAttrs as schema =
         Just (AttributeWithTypeRef  _ _ use) -> use == Optional
         Just (AttributeWithTypeDecl _ _ use) -> use == Optional
         Nothing -> error $ "No attribute declaration matching '" ++ name ++ "' found in schema!"
-
--- Utilities
-
-getElementAttributes :: Element -> Schema -> [Attribute]
-getElementAttributes (ElementRef r _ _ _) s = 
-  getElementAttributes (lookupEQNamed r $ elements s) s
-getElementAttributes (ElementWithTypeRef _ _ _ t _) s = 
-  getComplexTypeAttributes (lookupComplexType t s)
-getElementAttributes (ElementWithSimpleTypeDecl _ t _ _ _) s = 
-  []
-getElementAttributes (ElementWithComplexTypeDecl _ _ _ t _) _ =
-  getComplexTypeAttributes t
-
-getComplexTypeAttributes :: ComplexType -> [Attribute]
-getComplexTypeAttributes ct = case ct of 
-  ComplexTypeAll            _ _ as -> as
-  ComplexTypeChoice         _ _ as -> as
-  ComplexTypeSequence       _ _ as -> as
-  ComplexTypeSimpleContent  _ _ as -> as
-  ComplexTypeComplexContent _ _ as -> as
 
 -- Generic utility functions
 

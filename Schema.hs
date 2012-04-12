@@ -256,6 +256,13 @@ getUse node =
     "prohibited" -> Prohibited
     _            -> Optional -- TODO Verify that this is indeed default 
 
+getBounds :: Element -> (Occurs,Occurs)
+getBounds e = case e of
+  ElementRef                 _ mino maxo _   -> (mino,maxo)
+  ElementWithTypeRef         _ mino maxo _ _ -> (mino,maxo)
+  ElementWithSimpleTypeDecl  _ mino maxo _ _ -> (mino,maxo)
+  ElementWithComplexTypeDecl _ mino maxo _ _ -> (mino,maxo)
+
 -- SimpleType
 nodeToSimpleType :: Namespace -> Node -> SimpleType
 nodeToSimpleType tns node@(ElmNode n as (ElmList els)) =

@@ -4,6 +4,7 @@
 -- - Make a better error report, also using syserr if it contains something interesting
 -- - Add option to write test cases which fail validation to disk
 -- - Add an error count to the report, and perhaps a digest of all the errors?
+-- - Implement shrink count
 ------------------------------------------------------------------------
 
 module Main where
@@ -30,6 +31,7 @@ import System.Random
   )
 import System.Process ( readProcessWithExitCode )
 import System.IO.Unsafe ( unsafePerformIO )
+import Debug.Trace
 
 type ErrorString   = String
 type ProcessInput  = (FilePath, [String], ErrorString)
@@ -135,40 +137,42 @@ makeReport :: [G.XmlDoc]      -- Input docs
 makeReport inputDocs outputDocs pos numberOfRuns xsltPath outSchemaPath = 
   case firstFailure pos of
     Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
-    Just (i,err) -> case shrink firstFailureInput xsltPath outSchemaPath of
-      Nothing -> 
-        "Error found:\n" ++ err ++ "\nTest case (unshrunk):\n" ++ show firstFailureOutput
-      Just (shrunkInput,shrunkOutput,shrunkError) -> -- TODO Implement shrink count
-        "Error found:\n" ++ shrunkError 
---                         ++ "\nTest case (unshrunk):\n"++ show firstFailureOutput
---                         ++ "\n\nStylesheet output (unshrunk):\n" ++ show (inputDocs !! i)
-                         ++ "\nTest case (shrunk):\n"  ++ show shrunkInput
-                         ++ "\n\nStylesheet output (shrunk):\n" ++ show shrunkOutput
+    Just (i,err) -> "Error found:\n" ++ case shrink firstFailureInput xsltPath outSchemaPath of
+      Nothing -> err
+        ++ "\nTest case (unshrunk):\n" ++ show (inputDocs !! i)
+        ++ "\n\nStylesheet output (unshrunk):\n" ++ show firstFailureOutput
+      Just (shrunkInput,shrunkOutput,shrunkError) -> shrunkError 
+        ++ "\nTest case (unshrunk):\n" ++ show (inputDocs !! i)
+        ++ "\n\nStylesheet output (unshrunk):\n" ++ show firstFailureOutput
+        ++ "\n\nTest case (shrunk):\n"  ++ show shrunkInput
+        ++ "\n\nStylesheet output (shrunk):\n" ++ show shrunkOutput
       where
         firstFailureInput  = inputDocs  !! i
         firstFailureOutput = outputDocs !! i
+
+trc a = trace (show a) a
+tr s a = trace (s ++ show a) a
+tl l a = trace (show $ l a) a 
 
 shrink :: G.XmlDoc -> FilePath -> FilePath -> Maybe (G.XmlDoc,X.XmlDoc,ErrorString)
 shrink x xsltPath outSchemaPath = case smallest of
   [] -> Nothing
   l  -> Just $ head l
   where
-    smallest     = [ d
-                   | (s,d) <- zip sizes failures
-                   , s == minSize
-                   ]
-    minSize      = minimum sizes
-    sizes        = map (\(inDoc,outDoc,err) -> length $ show inDoc) failures
-    failures     = [ ( inDoc
-                     , fst $ M.fromJust f
-                     , snd $ M.fromJust f
-                     )
-                   | inDoc <- shrunk
-                   , let f = unsafeTransformAndValidate inDoc xsltPath outSchemaPath
-                   , f /= Nothing
-                   ]
-    shrunk       = shrinkXmlDoc x
-    smallestSize = minimum sizes
+    smallest = [ d
+               | (s,d) <- zip sizes failures
+               , s == minSize
+               ]
+    minSize  = minimum sizes
+    sizes    = map (\(inDoc,outDoc,err) -> length $ show inDoc) failures
+    failures = [ ( inDoc
+                 , fst $ M.fromJust f
+                 , snd $ M.fromJust f
+                 )
+               | inDoc <- shrinkXmlDoc x
+               , let f = unsafeTransformAndValidate inDoc xsltPath outSchemaPath
+               , f /= Nothing
+               ]
 
 unsafeTransformXmls :: [G.XmlDoc] -> FilePath -> [ProcessOutput] 
 unsafeTransformXmls xmlDocs xsltPath = unsafePerformIO (do
