@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 ------------------------------------------------------------------------
 -- QuickCheck generators for the types defined in the Schema module
@@ -15,7 +16,6 @@
 module Generator where
 
 import Schema
-import XmlParser -- TODO Can I get Schema to re-export this instead?
 import qualified RegEx as R
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
@@ -41,6 +41,66 @@ type ElementName  = Name
 type QTypeName    = QName
 type QElementName = QName
 
+data XmlDoc =
+    XmlDoc { version  :: String
+           , encoding :: String
+           , root     :: Node
+           }
+
+data Node = ElmNode Name [Attr] [Node] NodeSource
+          | TxtNode Name [Attr] String NodeSource
+          | EmpNode Name [Attr]        NodeSource
+
+type Name = String
+
+type Attr = (Name, String, AttrSource)
+
+--Below, 'Nothing' is used when the definition did not come from the schema
+type NodeSource = Maybe Element 
+type AttrSource = Maybe Attribute
+
+------------------------------------------------------------------------
+-- Classes and instances
+------------------------------------------------------------------------
+
+class Named a where
+  name :: a -> Name
+
+class HasAttrs a where
+  attrs :: a -> [Attr]
+
+instance Named Attr where
+  name (n,s,_) = n
+
+instance Named Node where
+  name (ElmNode n _ _ _) = n
+  name (TxtNode n _ _ _) = n
+  name (EmpNode n _   _) = n
+
+instance Named QName where
+  name (QName p n) = n
+
+instance HasAttrs Node where
+  attrs (ElmNode _ as _ _) = as
+  attrs (TxtNode _ as _ _) = as
+  attrs (EmpNode _ as   _) = as
+
+instance Show Node where
+  show (ElmNode n as el _) = wrap n as $ concatMap show el
+  show (TxtNode n as s  _) = wrap n as s
+  show (EmpNode n as    _) = wrap n as ""
+
+instance Show XmlDoc where
+  show XmlDoc { version = v, encoding = e, root = r } =
+    "<?xml version='" ++ v ++ "' encoding='" ++ e ++ "' ?>" ++ show r 
+
+wrap n as c = (begTag $ n ++ showAttrList as) ++ c ++ (endTag n)
+begTag n = "<"  ++ n ++ ">"
+endTag n = "</" ++ n ++ ">"
+
+showAttrList []         = ""
+showAttrList ((n,s,_):as) = " " ++ n ++ "='" ++ s ++ "'" ++ showAttrList as
+
 
 ------------------------------------------------------------------------
 -- Generators for XML schema types
@@ -52,7 +112,7 @@ genSchema s rootElementName =
      -- TODO Enforce assumption that maxOccurs of rootElement is 1
      let re = head r
          (QName prefix _) = stringToQName $ name re
-         r' = addAttribute re ("xmlns:" ++ prefix, targetNameSpace s)
+         r' = addAttr re ("xmlns:" ++ prefix, targetNameSpace s, Nothing)
      return XmlDoc
             { version  = "1.0" -- TODO These things should be taken from the Schema
             , encoding = "ISO-8859-1"
@@ -67,16 +127,18 @@ genElement :: Element -> Schema -> Q.Gen [Node]
 genElement e s = case e of
   -- TODO Implement substitution groups
   ElementRef ref mino maxo msg ->
-    genElement (lookupElement ref s) s 
+    genElement (lookupElement ref s) s
   ElementWithTypeRef n mino maxo t@(QName prefix name) msg ->
     sizedListOf mino maxo $ 
       if isXsdType t s
-      then genTxtNode (reduceQName n s) [] $ genBaseType name
-      else lookupTypeGen t s n
+      then genTxtNode (reduceQName n s) [] (genBaseType name) nodeSource
+      else lookupTypeGen t s n nodeSource
   ElementWithSimpleTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ genTxtNodeSimpleType t s (reduceQName n s)
+    sizedListOf mino maxo $ genTxtNodeSimpleType t s (reduceQName n s) nodeSource
   ElementWithComplexTypeDecl n mino maxo t ms -> 
-    sizedListOf mino maxo $ genComplexType t s n
+    sizedListOf mino maxo $ genComplexType t s n nodeSource
+  where
+    nodeSource = Just e
 
 isXsdType :: QTypeName -> Schema -> Bool 
 isXsdType t@(QName prefix name) s = prefix == xsdTypePrefix s 
@@ -104,14 +166,14 @@ lookupSimpleTypeGen typeName typingContext =
      Just simpleType -> genSimpleType simpleType typingContext
      Nothing -> error $ "SimpleType " ++ show typeName ++ " not found in schema!"
 
-lookupTypeGen :: QTypeName -> Schema -> QElementName -> Q.Gen Node
-lookupTypeGen typeName typingContext elmName =
+lookupTypeGen :: QTypeName -> Schema -> QElementName -> NodeSource -> Q.Gen Node
+lookupTypeGen typeName typingContext elmName nodeSource =
   case findByMaybeQName typeName (simpleTypes typingContext) of
     Just simpleType -> 
-      genTxtNode (reduceQName elmName typingContext) [] $ genSimpleType simpleType typingContext          
+      genTxtNode (reduceQName elmName typingContext) [] (genSimpleType simpleType typingContext) nodeSource
     Nothing ->
       case findByMaybeQName typeName (complexTypes typingContext) of
-        Just complexType -> genComplexType complexType typingContext elmName
+        Just complexType -> genComplexType complexType typingContext elmName nodeSource
         Nothing -> error $ "Type " ++ show typeName ++ " not found in schema!"
 
 lookupAttributeGen :: Ref -> Schema -> Q.Gen (Maybe Attr)
@@ -124,10 +186,16 @@ genAttribute a s = case a of
   where
     genAttributeAux aa useOvveride = case aa of
       AttributeWithTypeRef aQName aType use ->
-        useToMaybe (lookupSimpleTypeGen aType s) (prefer useOvveride use) (\v -> Just (name aQName, v))
+        useToMaybe (lookupSimpleTypeGen aType s) 
+                   (prefer useOvveride use)
+                   (\v -> Just (name aQName, v, attrSource))
       AttributeWithTypeDecl aQName simpleType use ->
-        useToMaybe (genSimpleType  simpleType s) (prefer useOvveride use) (\v -> Just (name aQName, v))
-    
+        useToMaybe (genSimpleType  simpleType s)
+                   (prefer useOvveride use)
+                   (\v -> Just (name aQName, v, attrSource))
+      where
+        attrSource = Just aa
+
     prefer (Just a) _ = a 
     prefer Nothing  b = b
     
@@ -145,50 +213,50 @@ genAttribute a s = case a of
              else return Nothing
         Prohibited -> return Nothing
 
-genComplexType :: ComplexType -> Schema -> QElementName -> Q.Gen Node
-genComplexType t typingContext elmName = case t of
+genComplexType :: ComplexType -> Schema -> QElementName -> NodeSource -> Q.Gen Node
+genComplexType t typingContext elmName nodeSource = case t of
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
-    genElmNode elmName nodeGens attrGens typingContext
+    genElmNode elmName nodeGens attrGens typingContext nodeSource
     where
       nodeGens :: [Q.Gen [Node]]
-      nodeGens = map (\i -> genItem i typingContext) sequenceItems
+      nodeGens = map (\i -> genItem i typingContext nodeSource) sequenceItems
       attrGens :: [Q.Gen (Maybe Attr)]
       attrGens = map (\a -> genAttribute a typingContext) as
 
-genItem :: Item -> Schema -> Q.Gen [Node]
-genItem i s =
+genItem :: Item -> Schema -> NodeSource -> Q.Gen [Node]
+genItem i s nodeSource =
   case i of
     IElement  x -> genElement  x s
     IGroup    x -> error "Unimplemented function: genGroup"
-    IChoice   x -> genChoice   x s
-    ISequence x -> genSequence x s
+    IChoice   x -> genChoice   x s nodeSource
+    ISequence x -> genSequence x s nodeSource
     IAny      x -> error "Unimplemented function: genAny"
 
-genChoice :: Choice -> Schema -> Q.Gen [Node]
-genChoice (Choice items) s =
-  do c <- Q.oneof $ map (\i -> genItem i s) items 
+genChoice :: Choice -> Schema -> NodeSource -> Q.Gen [Node]
+genChoice (Choice items) s nodeSource =
+  do c <- Q.oneof $ map (\i -> genItem i s nodeSource) items 
      return c
 
-genSequence :: Sequence -> Schema -> Q.Gen [Node]
-genSequence (Sequence items) s = concatGens $ map (\i -> genItem i s) items
+genSequence :: Sequence -> Schema -> NodeSource -> Q.Gen [Node]
+genSequence (Sequence items) s nodeSource = concatGens $ map (\i -> genItem i s nodeSource) items
 
 ------------------------------------------------------------------------
 -- Generators for XML document types
 ------------------------------------------------------------------------
 
-genElmNode :: QElementName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Schema -> Q.Gen Node
-genElmNode name childNodeGens attributeGens s = 
+genElmNode :: QElementName -> [Q.Gen [Node]] -> [Q.Gen (Maybe Attr)] -> Schema -> NodeSource -> Q.Gen Node
+genElmNode name childNodeGens attributeGens s nodeSource = 
   do attrs <- foldGen attributeGens 
                       (\ma as -> case ma of
                                    Just a  -> as ++ [a]
                                    Nothing -> as)
      nodes <- concatGens childNodeGens
-     return $ ElmNode (reduceQName name s) attrs $ ElmList $ nodes
+     return $ ElmNode (reduceQName name s) attrs nodes nodeSource
 
-genTxtNode :: ElementName -> [Attr] -> Q.Gen String -> Q.Gen Node
-genTxtNode n as gen = 
+genTxtNode :: ElementName -> [Attr] -> Q.Gen String -> NodeSource -> Q.Gen Node
+genTxtNode n as gen nodeSource = 
   do s <- gen
-     return $ TxtNode n [] $ xmlEncode s
+     return $ TxtNode n [] (xmlEncode s) nodeSource
 
 -- TODO Implement this more efficiently!
 genDecimal :: Q.Gen String
@@ -204,10 +272,10 @@ genInt :: Q.Gen String
 genInt = do (i::Int) <- Q.arbitrary
             return $ show i
 
-genTxtNodeSimpleType :: SimpleType -> Schema -> ElementName -> Q.Gen Node 
-genTxtNodeSimpleType t typingContext n =
+genTxtNodeSimpleType :: SimpleType -> Schema -> ElementName -> NodeSource -> Q.Gen Node 
+genTxtNodeSimpleType t typingContext n nodeSource =
   do s <- genSimpleType t typingContext
-     return $ TxtNode n [] s
+     return $ TxtNode n [] s nodeSource
 
 genSimpleType :: SimpleType -> Schema -> G.Gen String
 genSimpleType t typingContext   = 
@@ -418,3 +486,12 @@ genNCName =
                                          {- TODO Uncomment to make tests more exhaustive
                                          , ['\x0300'..'\x036F'], ['\x203F'..'\x2040']]
                                          -}
+
+------------------------------------------------------------------------
+-- Utility functions
+------------------------------------------------------------------------
+
+addAttr :: Node -> Attr -> Node
+addAttr (ElmNode n as el s) a = ElmNode n (a:as) el s
+addAttr (TxtNode n as el s) a = TxtNode n (a:as) el s
+addAttr (EmpNode n as    s) a = EmpNode n (a:as)    s

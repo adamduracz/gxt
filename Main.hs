@@ -8,9 +8,9 @@
 
 module Main where
 
-import Generator
+import qualified Generator as G
 import Schema
-import XmlParser
+import qualified XmlParser as X
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
@@ -37,7 +37,7 @@ outSchemaPathD   = "out.xsd"
 xslPathD         = "transform.xsl"    
 numberOfRunsD    = 10
 
-parseArgs :: IO (String,String,String,Int,Name)
+parseArgs :: IO (String,String,String,Int,G.Name)
 parseArgs = do args <- getArgs
                return $ case length args of
                           0 -> ( xslPathD
@@ -69,13 +69,13 @@ parseArgs = do args <- getArgs
 mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
            s <- readFile inSchemaPath
            let schema = readSchema s
-               gen = genSchema schema $ autoRootElementName schema rootElementName
+               gen = G.genSchema schema $ autoRootElementName schema rootElementName
            --putStrLn $ show schema
            randomXmlDocs <- generateTestData 1 gen
            mapM_ (putStrLn . show) randomXmlDocs
            transformedDocs <- transformXmls randomXmlDocs xslPath
            --mapM_ (putStrLn . show) transformedDocs
-           let docsToValidate = map (readTree . exitCode) transformedDocs
+           let docsToValidate = map (X.readTree . exitCode) transformedDocs
            --mapM_ (putStrLn . show) docsToValidate
            return ()
            where
@@ -84,12 +84,12 @@ mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName)
 main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
           s <- readFile inSchemaPath
           let schema = readSchema s
-              gen = genSchema schema $ autoRootElementName schema rootElementName
+              gen = G.genSchema schema $ autoRootElementName schema rootElementName
           randomXmlDocs <- generateTestData numberOfRuns gen
           --mapM_ (putStrLn . show) randomXmlDocs
           transformedDocs <- transformXmls randomXmlDocs xslPath
           --mapM_ (putStrLn . show) transformedDocs
-          let docsToValidate = map (readTree . exitCode) transformedDocs
+          let docsToValidate = map (X.readTree . exitCode) transformedDocs
           --mapM_ (putStrLn . show) docsToValidate
           valitationResults <- validateXmls docsToValidate outSchemaPath
           --mapM_ (putStrLn . show) valitationResults
@@ -109,12 +109,12 @@ firstFailure pos = case failures of
                , exitCode /= ExitSuccess 
                ]
 
-makeReport :: [XmlDoc] -> [ProcessOutput] -> Int -> String
+makeReport :: [X.XmlDoc] -> [ProcessOutput] -> Int -> String
 makeReport docs pos numberOfRuns = case firstFailure pos of
   Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
   Just (i,err) -> "Error found:\n" ++ err ++ "\nTest case:\n" ++ (show $ docs !! i)
 
-transformXmls :: [XmlDoc] -> String -> IO [ProcessOutput] 
+transformXmls :: [G.XmlDoc] -> String -> IO [ProcessOutput] 
 transformXmls xmlDocs xsltPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
   return resultTriples
@@ -123,7 +123,7 @@ transformXmls xmlDocs xsltPath = do
     readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
 -- | Produces a triple of input for the readProcessWithExitCode function
-transformCommand :: XmlDoc -> String -> ProcessInput
+transformCommand :: G.XmlDoc -> String -> ProcessInput
 transformCommand inputDoc xslPath =
   ( "xsltproc"    -- Path to the XSL transform command (xsltproc)  
   , [ xslPath     -- Path to the stylesheet
@@ -132,7 +132,7 @@ transformCommand inputDoc xslPath =
   , show inputDoc -- The XML string, will be passed to xsltproc through stdin
   )
 
-validateXmls :: [XmlDoc] -> String -> IO [ProcessOutput]
+validateXmls :: [X.XmlDoc] -> String -> IO [ProcessOutput]
 validateXmls xmlDocs schemaPath = do
   resultTriples <- mapM readProcessWithExitCode' cmds
   return resultTriples
@@ -140,7 +140,7 @@ validateXmls xmlDocs schemaPath = do
       cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
       readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
-validateXmlCommand :: XmlDoc -> String -> ProcessInput
+validateXmlCommand :: X.XmlDoc -> String -> ProcessInput
 validateXmlCommand docToValidate schemaPath =
   ( "xmllint"          -- Path to the XML validator command (xmllint)  
   , [ "--noout"        -- Prevent xmllint from writing output to stdout
