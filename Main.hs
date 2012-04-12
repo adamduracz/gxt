@@ -75,9 +75,9 @@ mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName)
            let schema = readSchema s
                gen = G.genSchema schema $ autoRootElementName schema rootElementName
            --putStrLn $ show schema
-           randomXmlDocs <- generateTestData 1 gen
+           let randomXmlDocs = unsafeGenerateTestData 1 gen
            mapM_ (putStrLn . show) randomXmlDocs
-           transformedDocs <- transformXmls randomXmlDocs xslPath
+           let transformedDocs = unsafeTransformXmls randomXmlDocs xslPath
            --mapM_ (putStrLn . show) transformedDocs
            let docsToValidate = map (X.readTree . exitCode) transformedDocs
            --mapM_ (putStrLn . show) docsToValidate
@@ -89,18 +89,30 @@ main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) 
           s <- readFile inSchemaPath
           let schema = readSchema s
               gen = G.genSchema schema $ autoRootElementName schema rootElementName
-          randomXmlDocs <- generateTestData numberOfRuns gen
+          let randomXmlDocs = unsafeGenerateTestData numberOfRuns gen
           --mapM_ (putStrLn . show) randomXmlDocs
-          transformedDocs <- transformXmls randomXmlDocs xslPath
+          let transformedDocs = unsafeTransformXmls randomXmlDocs xslPath
           --mapM_ (putStrLn . show) transformedDocs
-          let docsToValidate = map (X.readTree . exitCode) transformedDocs
+          let docsToValidate = map (X.readTree . sysout) transformedDocs
           --mapM_ (putStrLn . show) docsToValidate
-          valitationResults <- validateXmls docsToValidate outSchemaPath
+          let valitationResults = unsafeValidateXmls docsToValidate outSchemaPath
           --mapM_ (putStrLn . show) valitationResults
-          putStrLn $ makeReport randomXmlDocs docsToValidate valitationResults numberOfRuns
+          putStrLn $ makeReport randomXmlDocs 
+                                docsToValidate 
+                                valitationResults
+                                numberOfRuns 
+                                xslPath
+                                outSchemaPath
           return ()
           where
-            exitCode (_,e,_) = e
+            sysout (_,e,_) = e
+
+unsafeTransformAndValidate :: G.XmlDoc -> FilePath -> FilePath -> Maybe (X.XmlDoc,ErrorString)
+unsafeTransformAndValidate inDoc xsltPath outSchemaPath =
+  fmap (\err -> (outDoc,err)) $ unsafeValidateXmlDoc outDoc outSchemaPath
+  where
+    outDoc                   = X.readTree sysout
+    (exitCode,sysout,syserr) = unsafeTransformXmlDoc inDoc xsltPath
 
 -- | Returns the first failing test case along with the corresponding validator output
 firstFailure :: [ProcessOutput] -> Maybe (Int, ErrorString)
@@ -113,26 +125,63 @@ firstFailure pos = case failures of
                , exitCode /= ExitSuccess 
                ]
 
-makeReport :: [G.XmlDoc] -> [X.XmlDoc] -> [ProcessOutput] -> Int -> String
-makeReport inputDocs outputDocs pos numberOfRuns = case firstFailure pos of
-  Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
-  Just (i,err) -> case shrink firstFailureInput of
-    Nothing            -> "Error found:\n" ++ err ++ "\nTest case (unshrunk):\n" ++ show firstFailureOutput
-    -- TODO Implement shrink count
-    Just shrunkOutput  -> "Error found:\n" ++ err ++ "\nTest case (shrunk):\n"   ++ show shrunkOutput
-    where
-      firstFailureInput  = inputDocs  !! i
-      firstFailureOutput = outputDocs !! i
+makeReport :: [G.XmlDoc]      -- Input docs
+           -> [X.XmlDoc]      -- Output docs
+           -> [ProcessOutput] -- 
+           -> Int             -- 
+           -> FilePath        --  
+           -> FilePath        -- 
+           -> String          -- 
+makeReport inputDocs outputDocs pos numberOfRuns xsltPath outSchemaPath = 
+  case firstFailure pos of
+    Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
+    Just (i,err) -> case shrink firstFailureInput xsltPath outSchemaPath of
+      Nothing -> 
+        "Error found:\n" ++ err ++ "\nTest case (unshrunk):\n" ++ show firstFailureOutput
+      Just (shrunkInput,shrunkOutput,shrunkError) -> -- TODO Implement shrink count
+        "Error found:\n" ++ shrunkError 
+--                         ++ "\nTest case (unshrunk):\n"++ show firstFailureOutput
+--                         ++ "\n\nStylesheet output (unshrunk):\n" ++ show (inputDocs !! i)
+                         ++ "\nTest case (shrunk):\n"  ++ show shrunkInput
+                         ++ "\n\nStylesheet output (shrunk):\n" ++ show shrunkOutput
+      where
+        firstFailureInput  = inputDocs  !! i
+        firstFailureOutput = outputDocs !! i
 
-shrink :: G.XmlDoc -> Maybe G.XmlDoc
-shrink = error "shrink"
+shrink :: G.XmlDoc -> FilePath -> FilePath -> Maybe (G.XmlDoc,X.XmlDoc,ErrorString)
+shrink x xsltPath outSchemaPath = case smallest of
+  [] -> Nothing
+  l  -> Just $ head l
+  where
+    smallest     = [ d
+                   | (s,d) <- zip sizes failures
+                   , s == minSize
+                   ]
+    minSize      = minimum sizes
+    sizes        = map (\(inDoc,outDoc,err) -> length $ show inDoc) failures
+    failures     = [ ( inDoc
+                     , fst $ M.fromJust f
+                     , snd $ M.fromJust f
+                     )
+                   | inDoc <- shrunk
+                   , let f = unsafeTransformAndValidate inDoc xsltPath outSchemaPath
+                   , f /= Nothing
+                   ]
+    shrunk       = shrinkXmlDoc x
+    smallestSize = minimum sizes
 
-transformXmls :: [G.XmlDoc] -> FilePath -> IO [ProcessOutput] 
-transformXmls xmlDocs xsltPath = do
+unsafeTransformXmls :: [G.XmlDoc] -> FilePath -> [ProcessOutput] 
+unsafeTransformXmls xmlDocs xsltPath = unsafePerformIO (do
   resultTriples <- mapM readProcessWithExitCode' cmds
-  return resultTriples
+  return resultTriples)
   where
     cmds = map (\xmlDoc -> transformCommand xmlDoc xsltPath) xmlDocs
+    readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
+
+unsafeTransformXmlDoc :: G.XmlDoc -> FilePath -> ProcessOutput
+unsafeTransformXmlDoc xmlDoc xsltPath = 
+  unsafePerformIO $ readProcessWithExitCode' (transformCommand xmlDoc xsltPath) >>= return
+  where
     readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
 -- | Produces a triple of input for the readProcessWithExitCode function
@@ -145,17 +194,17 @@ transformCommand inputDoc xslPath =
   , show inputDoc -- The XML string, will be passed to xsltproc through stdin
   )
 
-validateXmls :: [X.XmlDoc] -> FilePath -> IO [ProcessOutput]
-validateXmls xmlDocs schemaPath = do
+unsafeValidateXmls :: [X.XmlDoc] -> FilePath -> [ProcessOutput]
+unsafeValidateXmls xmlDocs schemaPath = unsafePerformIO (do
   resultTriples <- mapM readProcessWithExitCode' cmds
-  return resultTriples
+  return resultTriples)
     where
       cmds = map (\xmlDoc -> validateXmlCommand xmlDoc schemaPath) xmlDocs
       readProcessWithExitCode' (path,args,stdin) = readProcessWithExitCode path args stdin
 
-unsafeValidateXmlDoc :: X.XmlDoc -> FilePath -> Maybe String
+unsafeValidateXmlDoc :: X.XmlDoc -> FilePath -> Maybe ErrorString
 unsafeValidateXmlDoc xmlDocs schemaPath =
-  case head $ unsafePerformIO $ validateXmls [xmlDocs] schemaPath of
+  case head $ unsafeValidateXmls [xmlDocs] schemaPath of
     (ExitSuccess,   _, _)   -> Nothing
     (ExitFailure _, _, err) -> Just err
 
@@ -170,8 +219,8 @@ validateXmlCommand docToValidate schemaPath =
   , show docToValidate -- The XML string, will be passed to xmllint through stdin
   )
 
-generateTestData :: Int -> Q.Gen a -> IO [a]
-generateTestData howMany g =
+unsafeGenerateTestData :: Int -> Q.Gen a -> [a]
+unsafeGenerateTestData howMany g = unsafePerformIO $
   do rnd0 <- newStdGen
      let m = G.unGen g
      let rnds rnd = rnd1 : rnds rnd2 where (rnd1,rnd2) = System.Random.split rnd

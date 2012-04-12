@@ -22,17 +22,18 @@ data XmlDoc =
     XmlDoc { version :: String
            , encoding :: String
            , root :: Node
-           }
+           } deriving (Eq)
 
 data Node = ElmNode Name [Attr] ElmList
           | TxtNode Name [Attr] String
           | EmpNode Name [Attr]
+          deriving (Eq)
 
 type Name = String
 
 type Attr = (Name, String)
 
-data ElmList = ElmList [Node]
+data ElmList = ElmList [Node] deriving (Eq)
 
 ------------------------------------------------------------------------
 -- Classes and instances
