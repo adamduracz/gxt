@@ -21,7 +21,7 @@ import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as G
 import qualified Codec.Binary.Base64.String as B64
-import Data.List (intersperse)
+import Data.List ( intersperse, permutations )
 
 ------------------------------------------------------------------------
 -- Constants
@@ -212,6 +212,15 @@ genAttribute a s = case a of
 
 genComplexType :: ComplexType -> Schema -> QElementName -> NodeSource -> Q.Gen Node
 genComplexType t typingContext elmName nodeSource = case t of
+  ComplexTypeAll mn (All es) as -> 
+    do i <- Q.elements [0..(length es - 1)]
+       e <- genElmNode elmName (nodeGenPerms !! i) attrGens typingContext nodeSource
+       return e
+       where
+         nodeGenPerms :: [[Q.Gen [Node]]]
+         nodeGenPerms = permutations $ map (\e -> genElement e typingContext) es
+         attrGens :: [Q.Gen (Maybe Attr)]
+         attrGens = map (\a -> genAttribute a typingContext) as
   ComplexTypeSequence mn (Sequence sequenceItems) as -> 
     genElmNode elmName nodeGens attrGens typingContext nodeSource
     where
@@ -219,6 +228,7 @@ genComplexType t typingContext elmName nodeSource = case t of
       nodeGens = map (\i -> genItem i typingContext nodeSource) sequenceItems
       attrGens :: [Q.Gen (Maybe Attr)]
       attrGens = map (\a -> genAttribute a typingContext) as
+
 
 genItem :: Item -> Schema -> NodeSource -> Q.Gen [Node]
 genItem i s nodeSource =
@@ -257,7 +267,7 @@ genTxtNode n as gen nodeSource =
 
 -- TODO Implement this more efficiently!
 genDecimal :: Q.Gen String
-genDecimal = genMatch $ R.readRegEx "(\\+|-)?\\d*(\\.)?\\d+"
+genDecimal = genMatch $ R.readRegEx "(\\+|-)?\\d+(\\.\\d+)?"
 
 -- TODO Replace this wasteful impl by one that directly generates a valid Base64 string
 genBase64String :: Q.Gen String
