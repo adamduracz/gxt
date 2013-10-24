@@ -17,4 +17,4 @@ How to compile
 How to run
 ---------
 
-`./gxt xslt in-xsd out-xsd [number-of-runs [root-element-name]`
+`./gxt xslt in-xsd out-xsd [number-of-runs] [root-element-name]`
