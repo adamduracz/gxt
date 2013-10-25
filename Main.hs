@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 
 ------------------------------------------------------------------------
 -- TODO
@@ -16,12 +17,12 @@ import Shrink ( shrinkXmlDoc )
 
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
-import qualified Test.QuickCheck.Gen as G
-import System
+import qualified Test.QuickCheck.Gen as Gen
+import System.Exit
   ( ExitCode (ExitSuccess, ExitFailure)
-  , getArgs
-  , system
   )
+import System.Environment
+  ( getArgs )
 import System.Random
   ( Random
   , StdGen
@@ -31,80 +32,47 @@ import System.Random
   )
 import System.Process ( readProcessWithExitCode )
 import System.IO.Unsafe ( unsafePerformIO )
+import System.Console.CmdArgs
 import Debug.Trace
 
 type ErrorString   = String
 type ProcessInput  = (FilePath, [String], ErrorString)
 type ProcessOutput = (ExitCode,  String , ErrorString)
 
--- TODO Extract these as command line parameters
-inSchemaPathD    = "in.xsd"
-outSchemaPathD   = "out.xsd"
-xslPathD         = "transform.xsl"    
-numberOfRunsD    = 10
+-- CmdArgs configuration
+data GXT = GXT
+  { xslPath         :: String
+  , inSchemaPath    :: String
+  , outSchemaPath   :: String
+  , numberOfRuns    :: Int   
+  , rootElementName :: G.Name
+  } deriving (Show, Data, Typeable)
 
-parseArgs :: IO (String,String,String,Int,G.Name)
-parseArgs = do args <- getArgs
-               return $ case length args of
-                          0 -> ( xslPathD
-                               , inSchemaPathD
-                               , outSchemaPathD
-                               , numberOfRunsD
-                               , "" -- Autodetect root element name
-                               )
-                          1 -> ( ""
-                               , inSchemaPathD
-                               , ""
-                               , 1
-                               , "" -- Autodetect root element name
-                               )
-                          3 -> ( args !! 0
-                               , args !! 1
-                               , args !! 2
-                               , numberOfRunsD
-                               , "" -- Autodetect root element name
-                               )
-                          5 -> ( args !! 0
-                               , args !! 1
-                               , args !! 2
-                               , read $ args !! 3
-                               , args !! 4
-                               )
-                          _ -> error "Use: faxt xslt in-xsd out-xsd [number-of-runs] [root-element-name]"
+gxtSummary = "Generator-Driven XSLT Tester.\n" ++ 
+             "See https://bitbucket.org/adamduracz/gxt for more information."
 
-mainG = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
-           s <- readFile inSchemaPath
-           let schema = readSchema s
-               gen = G.genSchema schema $ autoRootElementName schema rootElementName
-           --putStrLn $ show schema
-           let randomXmlDocs = unsafeGenerateTestData 1 gen
-           mapM_ (putStrLn . show) randomXmlDocs
-           let transformedDocs = unsafeTransformXmls randomXmlDocs xslPath
-           --mapM_ (putStrLn . show) transformedDocs
-           let docsToValidate = map (X.readTree . exitCode) transformedDocs
-           --mapM_ (putStrLn . show) docsToValidate
-           return ()
-           where
-             exitCode (_,e,_) = e
-
-main = do (xslPath, inSchemaPath, outSchemaPath, numberOfRuns, rootElementName) <- parseArgs
-          s <- readFile inSchemaPath
+main = do args <- cmdArgs $ 
+            GXT { xslPath         = def &= argPos 0 &= typ "XSLT"
+                , inSchemaPath    = def &= argPos 1 &= typ "IN-SCHEMA"
+                , outSchemaPath   = def &= argPos 2 &= typ "OUT-SCHEMA"
+                , numberOfRuns    = 10  &= typ "INT"
+                                 &= help "Number of documents to generate"
+                , rootElementName = def &= typ "NAME"
+                                 &= help "Name of root element in generated XML"
+                } &= summary gxtSummary
+          s <- readFile $ inSchemaPath args
           let schema = readSchema s
-              gen = G.genSchema schema $ autoRootElementName schema rootElementName
-          let randomXmlDocs = unsafeGenerateTestData numberOfRuns gen
-          --mapM_ (putStrLn . show) randomXmlDocs
-          let transformedDocs = unsafeTransformXmls randomXmlDocs xslPath
-          --mapM_ (putStrLn . show) transformedDocs
+              gen = G.genSchema schema $ autoRootElementName schema $ rootElementName args
+          let randomXmlDocs = unsafeGenerateTestData (numberOfRuns args) gen
+          let transformedDocs = unsafeTransformXmls randomXmlDocs $ xslPath args
           let docsToValidate = map (X.readTree . sysout) transformedDocs
-          --mapM_ (putStrLn . show) docsToValidate
-          let valitationResults = unsafeValidateXmls docsToValidate outSchemaPath
-          --mapM_ (putStrLn . show) valitationResults
+          let valitationResults = unsafeValidateXmls docsToValidate $ outSchemaPath args
           putStrLn $ makeReport randomXmlDocs 
-                                docsToValidate 
+                                docsToValidate
                                 valitationResults
-                                numberOfRuns 
-                                xslPath
-                                outSchemaPath
+                                (numberOfRuns args)
+                                (xslPath args)
+                                (outSchemaPath args)
           return ()
           where
             sysout (_,e,_) = e
@@ -129,11 +97,11 @@ firstFailure pos = case failures of
 
 makeReport :: [G.XmlDoc]      -- Input docs
            -> [X.XmlDoc]      -- Output docs
-           -> [ProcessOutput] -- 
-           -> Int             -- 
-           -> FilePath        --  
-           -> FilePath        -- 
-           -> String          -- 
+           -> [ProcessOutput]
+           -> Int
+           -> FilePath
+           -> FilePath
+           -> String
 makeReport inputDocs outputDocs pos numberOfRuns xsltPath outSchemaPath = 
   case firstFailure pos of
     Nothing      -> "Styleheet passed " ++ show numberOfRuns ++ " runs!"
@@ -226,7 +194,7 @@ validateXmlCommand docToValidate schemaPath =
 unsafeGenerateTestData :: Int -> Q.Gen a -> [a]
 unsafeGenerateTestData howMany g = unsafePerformIO $
   do rnd0 <- newStdGen
-     let m = G.unGen g
+     let m = Gen.unGen g
      let rnds rnd = rnd1 : rnds rnd2 where (rnd1,rnd2) = System.Random.split rnd
      return [(m r n) | (r,n) <- rnds rnd0 `zip` [0,2..(2 * howMany - 1)] ]
 

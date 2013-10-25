@@ -12,9 +12,14 @@ This tool is still experimental! Notable omissions from the XML Schema standard:
 How to compile
 -------------
 
-`ghc -o gxt Main.hs`
+`cabal install`
 
 How to run
 ---------
 
-`./gxt xslt in-xsd out-xsd [number-of-runs] [root-element-name]`
+`gxt [OPTIONS] XSLT IN-SCHEMA OUT-SCHEMA`
+
+How to view help
+---------
+
+`gxt --help`
