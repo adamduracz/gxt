@@ -20,6 +20,12 @@ How to run
 `gxt [OPTIONS] XSLT IN-SCHEMA OUT-SCHEMA`
 
 How to view help
----------
+----------------
 
 `gxt --help`
+
+Dependencies
+------------
+
+* xsltproc (XSLT execution)
+* xmllint (Schema validation)
