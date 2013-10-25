@@ -204,10 +204,9 @@ genAttribute a s = case a of
              return $ wrapper v
         Optional -> 
           do b <- Q.arbitrary
-             if b 
-             then do v <- gen
-                     return $ wrapper v
-             else return Nothing
+             if b then do v <- gen
+                          return $ wrapper v
+                  else return Nothing
         Prohibited -> return Nothing
 
 genComplexType :: ComplexType -> Schema -> QElementName -> NodeSource -> Q.Gen Node
