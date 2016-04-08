@@ -204,7 +204,7 @@ valueEnders = "=<>? \t\n\r"
  
 manyAnyTill = manyTill anyChar
 	
-manyCept s = many $ noneOf s
+manyCept = many . noneOf
 
 ---- Utilies
 

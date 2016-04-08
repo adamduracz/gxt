@@ -18,6 +18,7 @@ import Shrink ( shrinkXmlDoc )
 import qualified Data.Maybe as M
 import qualified Test.QuickCheck as Q
 import qualified Test.QuickCheck.Gen as Gen
+import Test.QuickCheck.Random as QCRandom
 import System.Exit
   ( ExitCode (ExitSuccess, ExitFailure)
   )
@@ -193,10 +194,10 @@ validateXmlCommand docToValidate schemaPath =
 
 unsafeGenerateTestData :: Int -> Q.Gen a -> [a]
 unsafeGenerateTestData howMany g = unsafePerformIO $
-  do rnd0 <- newStdGen
+  do rnd0 <- QCRandom.newTheGen
      let m = Gen.unGen g
      let rnds rnd = rnd1 : rnds rnd2 where (rnd1,rnd2) = System.Random.split rnd
-     return [(m r n) | (r,n) <- rnds rnd0 `zip` [0,2..(2 * howMany - 1)] ]
+     return [ (m (QCRandom.QCGen r) n) | (r,n) <- rnds rnd0 `zip` [0,2..(2 * howMany - 1)] ]
 
 
 
