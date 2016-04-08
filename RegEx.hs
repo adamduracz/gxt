@@ -234,8 +234,8 @@ singleCharEsc = char '\\' >> oneOf singleCharacterEscapes >>= \e -> return $ Sin
 
 readRegEx :: String -> RegEx
 readRegEx input = case parse regEx "regEx" input of
-	Right val -> val
-	Left  err -> error $ show err
+  Right val -> val
+  Left  err -> error $ show err
 
 {-
 literals :: RegEx -> [Char]

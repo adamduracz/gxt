@@ -74,19 +74,19 @@ instance Renamable Node where
 -- Show Node
 
 instance Show Node where
-	show (ElmNode n as el) = wrap n as $ show el
-	show (TxtNode n as s)  = wrap n as s
-	show (EmpNode n as)    = wrap n as ""
+  show (ElmNode n as el) = wrap n as $ show el
+  show (TxtNode n as s)  = wrap n as s
+  show (EmpNode n as)    = wrap n as ""
 
 instance Show ElmList where
-	show (ElmList ns) = concatMap show ns
-	
+  show (ElmList ns) = concatMap show ns
+  
 -- Show XmlDoc
 
 instance Show XmlDoc where
-	show XmlDoc { version = v, encoding = e, root = r } =
-		"<?xml version='" ++ v ++ "' encoding='" ++ e ++ "' ?>" ++ show r 
-	
+  show XmlDoc { version = v, encoding = e, root = r } =
+    "<?xml version='" ++ v ++ "' encoding='" ++ e ++ "' ?>" ++ show r 
+  
 wrap n as c = (begTag $ n ++ showAttrList as) ++ c ++ (endTag n)
 begTag n = "<"  ++ n ++ ">"
 endTag n = "</" ++ n ++ ">"
@@ -98,72 +98,72 @@ showAttrList ((n,s):as) = " " ++ n ++ "='" ++ s ++ "'" ++ showAttrList as
 
 xmlDoc :: Parser XmlDoc
 xmlDoc = do
-	spaces
-	(v,e) <- xmlHeader
-	spaces
-	r <- node
-	spaces
-	eof
-	return XmlDoc { version = v, encoding = e, root = r }
+  spaces
+  (v,e) <- xmlHeader
+  spaces
+  r <- node
+  spaces
+  eof
+  return XmlDoc { version = v, encoding = e, root = r }
 
 type Version = String
 type Encoding = String
 
 xmlHeader :: Parser (Version,Encoding)
 xmlHeader = do
-	string "<?xml"
-	spaces
-	as <- sepBy attr spaces
-	spaces
-	string "?>"
-	return (lookupS "version" as, lookupS "encoding" as)
+  string "<?xml"
+  spaces
+  as <- sepBy attr spaces
+  spaces
+  string "?>"
+  return (lookupS "version" as, lookupS "encoding" as)
 
 lookupS e l = case lookup e l of
-	Nothing -> ""
-	Just v  -> v
+  Nothing -> ""
+  Just v  -> v
 
 node :: Parser Node
 node =   try elmNode 
-	 <|> try txtNode 
-	 <|> try empNode
-	 <?> "valid element" 
-	
+   <|> try txtNode 
+   <|> try empNode
+   <?> "valid element" 
+  
 elmNode :: Parser Node
 elmNode = do
-	(n,as) <- openTag
-	spaces
-	l <- endBy node spaces
-	closeTag n
-	return $ ElmNode n as $ ElmList l
+  (n,as) <- openTag
+  spaces
+  l <- endBy node spaces
+  closeTag n
+  return $ ElmNode n as $ ElmList l
 
 txtNode :: Parser Node
 txtNode = do
-	(n,as) <- openTag
-	t <- textContent
-	closeTag n
-	return $ TxtNode n as t
+  (n,as) <- openTag
+  t <- textContent
+  closeTag n
+  return $ TxtNode n as t
 
 empNode :: Parser Node
 empNode = do
-	(n,as) <- tagInit
-	string "/>"
-	return $ EmpNode n as
+  (n,as) <- tagInit
+  string "/>"
+  return $ EmpNode n as
 
 openTag :: Parser (Name,[Attr])
 openTag = do
-	(n,as) <- tagInit
-	char '>'
-	return (n,as)
+  (n,as) <- tagInit
+  char '>'
+  return (n,as)
 
 tagInit :: Parser (Name,[Attr])
 tagInit = do
-	char '<'
-	spaces
-	n <- nameString
-	spaces
-	as <- sepBy attr spaces
-	spaces
-	return (n,as)
+  char '<'
+  spaces
+  n <- nameString
+  spaces
+  as <- sepBy attr spaces
+  spaces
+  return (n,as)
 
 closeTag :: String -> Parser String
 closeTag n = string $ "</" ++ n ++ ">"
@@ -173,19 +173,19 @@ textContent = manyCept "<"
 
 attr :: Parser Attr
 attr = do
-	n <- nameString
-	spaces
-	(char '=')
-	spaces
-	v <- attrValue
-	spaces
-	return (n,v)
+  n <- nameString
+  spaces
+  (char '=')
+  spaces
+  v <- attrValue
+  spaces
+  return (n,v)
 
 attrValue :: Parser String
 attrValue =   try (quotedValue '\'') 
-		  <|> try (quotedValue '"')
-		  <|> try unquotedValue
-		  <?> "valid attribute value"
+      <|> try (quotedValue '"')
+      <|> try unquotedValue
+      <?> "valid attribute value"
 
 nameString :: Parser String
 nameString = manyCept $ '/' : valueEnders
@@ -196,14 +196,14 @@ unquotedValue = manyAnyTill $     lookAhead (char '/' >> spaces >> char '>')
 
 quotedValue :: Char -> Parser String
 quotedValue q = char q >> manyAnyTill (char q)
-	
+  
 valueEnders :: String
 valueEnders = "=<>? \t\n\r"
 
 -- Helper combinators
  
 manyAnyTill = manyTill anyChar
-	
+  
 manyCept = many . noneOf
 
 ---- Utilies
@@ -231,13 +231,13 @@ addAttribute (EmpNode n as)    a = EmpNode n (a:as)
 
 readTree :: String -> XmlDoc
 readTree input = case parse xmlDoc "xml" input of
-	Left  err -> error $ show err
-	Right val -> val
+  Left  err -> error $ show err
+  Right val -> val
 
 readXML inFile = do
-	jas <- readFile inFile
-	jasNode <- return $ readTree jas
-	putStrLn $ show jasNode
+  jas <- readFile inFile
+  jasNode <- return $ readTree jas
+  putStrLn $ show jasNode
 
 
 
