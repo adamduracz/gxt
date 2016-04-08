@@ -2,7 +2,7 @@ name:             gxt
 version:          0.1.0.0
 synopsis:         Generator-Driven XSLT Tester
 -- description:      
-homepage:         https://bitbucket.org/adamduracz/gxt
+homepage:         https://github.com/adamduracz/gxt
 license:          BSD3
 license-file:     LICENSE
 author:           Adam Duracz

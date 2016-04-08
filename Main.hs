@@ -50,7 +50,7 @@ data GXT = GXT
   } deriving (Show, Data, Typeable)
 
 gxtSummary = "Generator-Driven XSLT Tester.\n" ++ 
-             "See https://bitbucket.org/adamduracz/gxt for more information."
+             "See https://github.com/adamduracz/gxt for more information."
 
 main = do args <- cmdArgs $ 
             GXT { xslPath         = def &= argPos 0 &= typ "XSLT"
